@@ -1,0 +1,153 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="expo.modules.sharingservice" >
+4
+5    <uses-sdk android:minSdkVersion="24" />
+5-->INJECTED
+5-->INJECTED
+6
+7    <uses-permission android:name="android.permission.INTERNET" />
+7-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:2:3-65
+7-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:2:20-62
+8    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+8-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:3:3-77
+8-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:3:20-74
+9    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+9-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:4:3-74
+9-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:4:20-71
+10    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+10-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:5:3-74
+10-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:5:20-71
+11    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+11-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:6:3-84
+11-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:6:20-81
+12    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+12-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:7:3-75
+12-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:7:20-72
+13    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+13-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:8:3-92
+13-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:8:20-89
+14    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+14-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:9:3-79
+14-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:9:20-76
+15    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+15-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:10:3-75
+15-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:10:20-72
+16    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+16-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:11:3-93
+16-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:11:20-90
+17    <uses-permission android:name="android.permission.WAKE_LOCK" />
+17-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:12:3-66
+17-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:12:20-63
+18
+19    <application>
+19-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:14:3-66:17
+20
+21        <!-- connectedDevice (not dataSync) because Android 15 blocks dataSync services from starting at boot. -->
+22        <service
+22-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:16:5-19:57
+23            android:name="expo.modules.sharingservice.SharingService"
+23-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:17:7-37
+24            android:exported="false"
+24-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:18:7-31
+25            android:foregroundServiceType="connectedDevice" />
+25-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:19:7-54
+26
+27        <receiver
+27-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:21:5-26:16
+28            android:name="expo.modules.sharingservice.BootReceiver"
+28-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:21:15-43
+29            android:exported="true" >
+29-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:21:44-67
+30            <intent-filter>
+30-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:22:7-25:23
+31                <action android:name="android.intent.action.BOOT_COMPLETED" />
+31-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:23:9-71
+31-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:23:17-68
+32                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+32-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:24:9-76
+32-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:24:17-73
+33            </intent-filter>
+34        </receiver>
+35
+36        <!-- Share sheet entry: "Send to laptop". No UI; finishes immediately. -->
+37        <activity
+37-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:29:5-46:16
+38            android:name="expo.modules.sharingservice.ShareReceiverActivity"
+38-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:30:7-44
+39            android:excludeFromRecents="true"
+39-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:33:7-40
+40            android:exported="true"
+40-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:31:7-30
+41            android:label="Send to laptop"
+41-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:32:7-37
+42            android:taskAffinity=""
+42-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:34:7-30
+43            android:theme="@android:style/Theme.Translucent.NoTitleBar" >
+43-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:35:7-66
+44            <intent-filter>
+44-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:36:7-40:23
+45                <action android:name="android.intent.action.SEND" />
+45-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:37:9-61
+45-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:37:17-58
+46
+47                <category android:name="android.intent.category.DEFAULT" />
+47-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:38:9-68
+47-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:38:19-65
+48
+49                <data android:mimeType="*/*" />
+49-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:39:9-40
+49-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:39:15-37
+50            </intent-filter>
+51            <intent-filter>
+51-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:41:7-45:23
+52                <action android:name="android.intent.action.SEND_MULTIPLE" />
+52-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:42:9-70
+52-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:42:17-67
+53
+54                <category android:name="android.intent.category.DEFAULT" />
+54-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:38:9-68
+54-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:38:19-65
+55
+56                <data android:mimeType="*/*" />
+56-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:39:9-40
+56-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:39:15-37
+57            </intent-filter>
+58        </activity>
+59
+60        <!-- Reads the clipboard while focused (the only time Android 10+ allows it) and sends it. -->
+61        <activity
+61-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:49:5-54:69
+62            android:name="expo.modules.sharingservice.ClipboardSendActivity"
+62-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:50:7-44
+63            android:excludeFromRecents="true"
+63-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:52:7-40
+64            android:exported="false"
+64-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:51:7-31
+65            android:taskAffinity=""
+65-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:53:7-30
+66            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+66-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:54:7-66
+67
+68        <service
+68-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:56:5-65:15
+69            android:name="expo.modules.sharingservice.ClipTileService"
+69-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:57:7-38
+70            android:exported="true"
+70-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:58:7-30
+71            android:icon="@android:drawable/ic_menu_send"
+71-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:59:7-52
+72            android:label="Send clipboard"
+72-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:60:7-37
+73            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE" >
+73-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:61:7-71
+74            <intent-filter>
+74-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:62:7-64:23
+75                <action android:name="android.service.quicksettings.action.QS_TILE" />
+75-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:63:9-79
+75-->/home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/AndroidManifest.xml:63:17-76
+76            </intent-filter>
+77        </service>
+78    </application>
+79
+80</manifest>
