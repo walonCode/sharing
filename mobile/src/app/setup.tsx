@@ -1,7 +1,7 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Device from "expo-device";
 import { router, useFocusEffect } from "expo-router";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PermissionsAndroid, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { parseInvite } from "../lib/invite";
 import { getReceiveFolder } from "../lib/laptop";
@@ -17,6 +17,8 @@ export default function Setup() {
   const [message, setMessage] = useState<string | null>(null);
   const [notificationsOk, setNotificationsOk] = useState(false);
   const [batteryOk, setBatteryOk] = useState(() => SharingService.isBatteryOptimizationIgnored());
+
+  const pairRef = useRef<(raw: string) => void>(() => {});
 
   async function pair(raw: string) {
     const invite = parseInvite(raw);
@@ -36,16 +38,36 @@ export default function Setup() {
     }
   }
 
+  // Google's code scanner (its own UI with a viewfinder) reports results here.
+  useEffect(() => {
+    const sub = CameraView.onModernBarcodeScanned(({ data }) => {
+      pairRef.current(data);
+    });
+    return () => sub.remove();
+  }, []);
+
   async function allowNotifications() {
     if (Platform.OS !== "android") return;
     const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
     setNotificationsOk(result === PermissionsAndroid.RESULTS.GRANTED || Platform.Version < 33);
   }
 
+  useEffect(() => {
+    pairRef.current = pair;
+  });
+
   async function openScanner() {
     if (!cameraPermission?.granted && !(await requestCamera()).granted) {
       setMessage("Camera permission is needed to scan. You can paste the link instead.");
       return;
+    }
+    if (CameraView.isModernBarcodeScannerAvailable) {
+      try {
+        await CameraView.launchScanner({ barcodeTypes: ["qr"] });
+        return;
+      } catch {
+        // fall through to the in-app camera
+      }
     }
     setScanning(true);
   }
@@ -69,6 +91,10 @@ export default function Setup() {
           barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
           onBarcodeScanned={busy ? undefined : ({ data }) => pair(data)}
         />
+        <View style={styles.overlay} pointerEvents="none">
+          <View style={styles.frame} />
+          <Text style={styles.scanText}>{busy ? "Pairing…" : (message ?? "Point at the QR code on your laptop")}</Text>
+        </View>
         <Pressable style={styles.cancel} onPress={() => setScanning(false)}>
           <Text style={styles.buttonText}>Cancel</Text>
         </Pressable>
@@ -177,5 +203,8 @@ const styles = StyleSheet.create({
   button: { backgroundColor: "#208AEF", padding: 14, borderRadius: 10, alignItems: "center" },
   buttonDisabled: { opacity: 0.4 },
   buttonText: { color: "white", fontWeight: "600" },
+  overlay: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", gap: 20 },
+  frame: { width: 260, height: 260, borderWidth: 4, borderColor: "white", borderRadius: 24 },
+  scanText: { color: "white", fontWeight: "600", textAlign: "center", paddingHorizontal: 24, textShadowColor: "black", textShadowRadius: 6 },
   cancel: { position: "absolute", bottom: 40, alignSelf: "center", backgroundColor: "#000a", padding: 14, borderRadius: 10 },
 });

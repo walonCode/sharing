@@ -13,7 +13,7 @@ export JAVA_HOME ANDROID_HOME
 GO_LDFLAGS := -s -w
 
 .DEFAULT_GOAL := help
-.PHONY: help test test-api test-mobile daemon service setup daemon-uninstall apk phone logs clean
+.PHONY: apk-quick help test test-api test-mobile daemon service setup daemon-uninstall apk phone logs clean
 
 help: ## Show this help
 	@awk 'BEGIN{FS=":.*## "} /^[a-zA-Z_-]+:.*## /{printf "  \033[1m%-18s\033[0m %s\n",$$1,$$2}' $(MAKEFILE_LIST)
@@ -60,7 +60,16 @@ apk: ## Build the minified release APK into dist/sharing.apk
 	cp mobile/android/app/build/outputs/apk/release/app-release.apk $(APK)
 	@ls -lh $(APK)
 
+apk-quick: ## Rebuild the APK reusing mobile/android (fast; use after JS-only changes)
+	cd mobile/android && ./gradlew assembleRelease
+	@mkdir -p $(DIST)
+	cp mobile/android/app/build/outputs/apk/release/app-release.apk $(APK)
+	@ls -lh $(APK)
+
 phone: apk ## Build the release APK and install it on the connected phone
+	adb install -r $(APK)
+
+phone-quick: apk-quick ## apk-quick, then install on the connected phone
 	adb install -r $(APK)
 
 clean: ## Remove build output
