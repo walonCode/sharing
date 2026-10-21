@@ -40,3 +40,5 @@ Lint + typecheck clean for `mobile/`, Go tests pass, end-to-end manual test on a
 - Android 10+ blocks background clipboard reads. Phone to laptop clipboard is therefore explicit: the "Send clipboard" quick-settings tile, or sharing text to "Send to laptop". Laptop to phone clipboard is applied automatically (writes are allowed in the background).
 - Connection order: last known address, then mDNS. Reconnects with 1s to 30s backoff and immediately on network changes.
 - Status: Kotlin compiles against SDK 58 and the merged manifest builds; not yet exercised on a physical device.
+- Update: phone to laptop clipboard can also be made automatic with an opt-in mode (`ClipWatcher`): READ_LOGS (granted over adb) detects copies from the system log, and a 1px overlay window gives the app focus to read the clipboard. Android 13+ asks for "Allow one-time access" each time the service restarts. See the README for setup and trade-offs.
+- Update: the folder pickers were replaced by per-sender folders (`<receive dir>/<phone name>` on the laptop, `Downloads/<laptop name>` on the phone via MediaStore).
