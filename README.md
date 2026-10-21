@@ -12,7 +12,7 @@ AirDrop-style sharing between a Linux laptop and an Android phone over your loca
 | --- | --- |
 | Send phone → laptop | Share from any app and pick **Send to laptop**. |
 | Send a folder phone → laptop | Open the app, **Send a folder to laptop**. |
-| Send laptop → phone | `sharingd send photo.jpg Videos/` |
+| Send laptop → phone | In your file manager: right-click → **Scripts → Send to phone** (Nautilus) or **Open With → Send to phone**. Or `sharingd send photo.jpg Videos/`. A desktop notification confirms. |
 | Copy laptop → phone | Copy as usual; it appears on the phone. |
 | Copy phone → laptop | Tap the **Send clipboard** quick-settings tile, or share text to **Send to laptop**. |
 
@@ -59,7 +59,7 @@ Open the app and follow the two setup steps: scan the QR, then allow notificatio
 
 | Command | |
 | --- | --- |
-| `sharingd install` / `uninstall` | Add or remove the systemd user service |
+| `sharingd install` / `uninstall` | Add or remove the systemd user service and the file-manager "Send to phone" entries |
 | `sharingd setup [--dir PATH] [--name NAME]` | Set the receive folder or device name, show a pairing QR |
 | `sharingd pair` | Show a new pairing QR (valid 5 minutes) |
 | `sharingd peers` | List paired phones and whether they are online |

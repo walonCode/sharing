@@ -58,6 +58,9 @@ func Install() (string, error) {
 	if err := os.WriteFile(path, []byte(UnitFile(exe)), 0o644); err != nil {
 		return "", err
 	}
+	if err := InstallIntegration(exe); err != nil {
+		return path, fmt.Errorf("file manager entries: %w", err)
+	}
 	for _, args := range [][]string{{"daemon-reload"}, {"enable", "--now", UnitName}} {
 		if out, err := exec.Command("systemctl", append([]string{"--user"}, args...)...).CombinedOutput(); err != nil {
 			return path, fmt.Errorf("systemctl %v: %w: %s", args, err, out)
@@ -77,6 +80,7 @@ func EnableLinger() error {
 
 // Uninstall stops and removes the unit.
 func Uninstall() error {
+	_ = RemoveIntegration()
 	_ = exec.Command("systemctl", "--user", "disable", "--now", UnitName).Run()
 	path, err := UnitPath()
 	if err != nil {

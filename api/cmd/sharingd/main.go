@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -163,7 +164,11 @@ func peers() error {
 
 // send asks the running daemon to offer a file or folder to a paired phone.
 // Usage: sharingd send [--to <id|name>] <path>...
-func send(args []string) error {
+func send(args []string) (err error) {
+	// Launched from a file manager there is no terminal to show the result in.
+	if !isTerminal(os.Stdout) {
+		defer func() { notify(args, err) }()
+	}
 	var to string
 	var paths []string
 	for i := 0; i < len(args); i++ {
@@ -266,4 +271,35 @@ func unpair(args []string) error {
 	}
 	fmt.Println("unpaired", args[0])
 	return nil
+}
+
+func isTerminal(f *os.File) bool {
+	st, err := f.Stat()
+	return err == nil && st.Mode()&os.ModeCharDevice != 0
+}
+
+// notify reports the outcome of a send as a desktop notification, if possible.
+func notify(args []string, sendErr error) {
+	bin, err := exec.LookPath("notify-send")
+	if err != nil {
+		return
+	}
+	title, body := "Sent to phone", fmt.Sprintf("%d item(s) offered", countPaths(args))
+	if sendErr != nil {
+		title, body = "Could not send to phone", sendErr.Error()
+	}
+	_ = exec.Command(bin, "--app-name=sharing", title, body).Run()
+}
+
+// countPaths counts the paths in send's arguments (everything except --to and its value).
+func countPaths(args []string) int {
+	n := 0
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--to" && i+1 < len(args) {
+			i++
+			continue
+		}
+		n++
+	}
+	return n
 }
