@@ -2,9 +2,13 @@ package control
 
 import (
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -87,4 +91,41 @@ func TestUnpairRevokesAccess(t *testing.T) {
 	if len(store.Peers()) != 0 {
 		t.Fatal("peer still stored")
 	}
+}
+
+func TestListenRefusesLiveSocketAndReplacesStaleOne(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.sock")
+	first, err := Listen(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { // accept so dials succeed
+		for {
+			c, err := first.Accept()
+			if err != nil {
+				return
+			}
+			c.Close()
+		}
+	}()
+	if _, err := Listen(path); !errors.Is(err, ErrAlreadyRunning) {
+		t.Fatalf("second Listen = %v, want ErrAlreadyRunning", err)
+	}
+	// The first daemon's socket must still be intact.
+	if c, err := net.Dial("unix", path); err != nil {
+		t.Fatalf("live socket was disturbed: %v", err)
+	} else {
+		c.Close()
+	}
+
+	// A dead daemon leaves a stale file; the next one replaces it.
+	first.Close()
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second, err := Listen(path)
+	if err != nil {
+		t.Fatalf("stale socket not replaced: %v", err)
+	}
+	second.Close()
 }

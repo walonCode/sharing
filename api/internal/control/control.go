@@ -147,8 +147,17 @@ func Handler(srv *server.Server, svc *transfer.Service, fp string) http.Handler 
 	return mux
 }
 
-// Listen removes a stale socket and listens on path with 0600 permissions.
+// ErrAlreadyRunning means another daemon is already serving the control socket.
+var ErrAlreadyRunning = errors.New("sharingd is already running")
+
+// Listen listens on path with 0600 permissions. A socket left behind by a crashed
+// daemon is replaced, but one that still answers belongs to a live daemon and is
+// never touched: a second instance must not take over its control socket.
 func Listen(path string) (net.Listener, error) {
+	if c, err := net.DialTimeout("unix", path, time.Second); err == nil {
+		c.Close()
+		return nil, ErrAlreadyRunning
+	}
 	_ = os.Remove(path)
 	l, err := net.Listen("unix", path)
 	if err != nil {
