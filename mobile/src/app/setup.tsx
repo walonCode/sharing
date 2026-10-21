@@ -1,8 +1,10 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Device from "expo-device";
 import { router, useFocusEffect } from "expo-router";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PermissionsAndroid, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ErrorBanner } from "../components/ErrorBanner";
+import { friendlyError } from "../lib/errors";
 import { parseInvite } from "../lib/invite";
 import { getReceiveFolder } from "../lib/laptop";
 import { SharingService, useSharingStatus } from "../lib/sharing";
@@ -18,10 +20,12 @@ export default function Setup() {
   const [notificationsOk, setNotificationsOk] = useState(false);
   const [batteryOk, setBatteryOk] = useState(() => SharingService.isBatteryOptimizationIgnored());
 
+  const pairRef = useRef<(raw: string) => void>(() => {});
+
   async function pair(raw: string) {
     const invite = parseInvite(raw);
     if (!invite) {
-      setMessage("That is not a sharing pairing link. Run `sharingd setup` on your laptop and scan its QR.");
+      setMessage(friendlyError(new Error("Not a sharing pairing link")));
       return;
     }
     setBusy(true);
@@ -30,11 +34,19 @@ export default function Setup() {
       await SharingService.pair(raw.trim(), Device.deviceName ?? Device.modelName ?? "Android phone");
       setScanning(false);
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : String(e));
+      setMessage(friendlyError(e));
     } finally {
       setBusy(false);
     }
   }
+
+  // Google's code scanner (its own UI with a viewfinder) reports results here.
+  useEffect(() => {
+    const sub = CameraView.onModernBarcodeScanned(({ data }) => {
+      pairRef.current(data);
+    });
+    return () => sub.remove();
+  }, []);
 
   async function allowNotifications() {
     if (Platform.OS !== "android") return;
@@ -42,10 +54,22 @@ export default function Setup() {
     setNotificationsOk(result === PermissionsAndroid.RESULTS.GRANTED || Platform.Version < 33);
   }
 
+  useEffect(() => {
+    pairRef.current = pair;
+  });
+
   async function openScanner() {
     if (!cameraPermission?.granted && !(await requestCamera()).granted) {
       setMessage("Camera permission is needed to scan. You can paste the link instead.");
       return;
+    }
+    if (CameraView.isModernBarcodeScannerAvailable) {
+      try {
+        await CameraView.launchScanner({ barcodeTypes: ["qr"] });
+        return;
+      } catch {
+        // fall through to the in-app camera
+      }
     }
     setScanning(true);
   }
@@ -69,6 +93,10 @@ export default function Setup() {
           barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
           onBarcodeScanned={busy ? undefined : ({ data }) => pair(data)}
         />
+        <View style={styles.overlay} pointerEvents="none">
+          <View style={styles.frame} />
+          <Text style={styles.scanText}>{busy ? "Pairing…" : (message ?? "Point at the QR code on your laptop")}</Text>
+        </View>
         <Pressable style={styles.cancel} onPress={() => setScanning(false)}>
           <Text style={styles.buttonText}>Cancel</Text>
         </Pressable>
@@ -81,6 +109,9 @@ export default function Setup() {
       <Text style={styles.intro}>
         Set up once. Afterwards sharing and clipboard sync run in the background without opening this app.
       </Text>
+
+      {busy ? <Text style={styles.hint}>Pairing…</Text> : null}
+      {message ? <ErrorBanner title="Couldn't pair" message={message} onDismiss={() => setMessage(null)} /> : null}
 
       <Step n={1} title="Pair with your laptop" done={status.paired} doneText={`Paired with ${status.laptopName}`}>
         <Text style={styles.hint}>On the laptop run `sharingd setup`, then scan the QR.</Text>
@@ -116,8 +147,6 @@ export default function Setup() {
           }}
         />
       </Step>
-
-      {message ? <Text style={styles.error}>{message}</Text> : null}
 
       <Button
         label="Finish and start"
@@ -177,5 +206,8 @@ const styles = StyleSheet.create({
   button: { backgroundColor: "#208AEF", padding: 14, borderRadius: 10, alignItems: "center" },
   buttonDisabled: { opacity: 0.4 },
   buttonText: { color: "white", fontWeight: "600" },
+  overlay: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", gap: 20 },
+  frame: { width: 260, height: 260, borderWidth: 4, borderColor: "white", borderRadius: 24 },
+  scanText: { color: "white", fontWeight: "600", textAlign: "center", paddingHorizontal: 24, textShadowColor: "black", textShadowRadius: 6 },
   cancel: { position: "absolute", bottom: 40, alignSelf: "center", backgroundColor: "#000a", padding: 14, borderRadius: 10 },
 });
