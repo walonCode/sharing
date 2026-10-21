@@ -73,7 +73,7 @@ Android 10+ hides the clipboard from background apps, so out of the box phone â†
 
 **Set it up.**
 
-1. Connect the phone by USB and run (once; it survives reboots and app updates, but not an uninstall):
+1. Connect the phone by USB and run (once; it survived every app update in testing, and is removed by an uninstall; check it again with the command in Troubleshooting if copying stops after a reboot):
    ```bash
    adb shell pm grant com.walon.sharing android.permission.READ_LOGS
    ```
