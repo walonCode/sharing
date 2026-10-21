@@ -64,6 +64,18 @@ class SharingServiceModule : Module() {
       status()
     }
 
+    // Laptop folder browsing; each returns the laptop's JSON response as a string.
+    AsyncFunction("listLaptopFolders") { path: String ->
+      Net.laptop(Prefs(ctx), "GET", "/fs?path=" + java.net.URLEncoder.encode(path, "UTF-8"))
+    }
+    AsyncFunction("createLaptopFolder") { parent: String, name: String ->
+      Net.laptop(Prefs(ctx), "POST", "/fs/mkdir", org.json.JSONObject().put("parent", parent).put("name", name))
+    }
+    AsyncFunction("setLaptopReceiveFolder") { path: String ->
+      Net.laptop(Prefs(ctx), "PUT", "/settings", org.json.JSONObject().put("receiveDir", path))
+    }
+    AsyncFunction("getLaptopSettings") { Net.laptop(Prefs(ctx), "GET", "/settings") }
+
     AsyncFunction("pickReceiveFolder") { promise: Promise -> pickTree(PICK_RECEIVE, promise) }
     AsyncFunction("pickFolderToSend") { promise: Promise -> pickTree(PICK_SEND, promise) }
 

@@ -70,4 +70,24 @@ object Net {
       prefs.lastPort = invite.port
     }
   }
+
+  private fun base(prefs: Prefs): String {
+    val host = prefs.lastHost ?: error("Not paired")
+    return "https://${if (host.contains(':')) "[$host]" else host}:${prefs.lastPort}"
+  }
+
+  /** Authenticated call to the laptop's folder API; returns the JSON body. Blocking. */
+  fun laptop(prefs: Prefs, method: String, path: String, json: JSONObject? = null): String {
+    val fp = prefs.fingerprint ?: error("Not paired")
+    val body = json?.toString()?.toRequestBody("application/json".toMediaType())
+    val req = Request.Builder().url(base(prefs) + path)
+      .header("Authorization", "Bearer ${prefs.peerToken}")
+      .method(method, body ?: if (method == "GET") null else "".toRequestBody())
+      .build()
+    client(fp).newCall(req).execute().use { resp ->
+      val text = resp.body?.string().orEmpty()
+      if (!resp.isSuccessful) error(text.trim().ifEmpty { "Laptop returned ${resp.code}" })
+      return text
+    }
+  }
 }
