@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository state
 
-Early-stage monorepo with two independent projects (no root build tooling, not a git repo yet; root `README.md` is empty):
+Early-stage monorepo with two independent projects (no root build tooling; root `README.md` is empty):
 
 - `api/` — Go module `api` (`go 1.27.2`), the laptop daemon `sharingd`. The laptop is the only server (HTTPS, self-signed cert pinned by fingerprint); the phone is always a client. Packages under `internal/`: `config` (settings, peers, TLS identity), `pairing` (single-use invites to peer tokens), `protocol` (ws messages), `server` (routes, bearer auth, ws hub), `discovery` (mDNS `_sharing._tcp`), `transfer` (tar pack/safe unpack, offers, upload/download), `control` (unix-socket API used by the CLI). Design and roadmap: `docs/plan1.md`, `docs/plan2.md`.
 - `mobile/` — Expo / React Native app (Expo SDK 58, React 19.3, RN 0.88, TypeScript, bun lockfile). Source is under `mobile/src/` (`app/` holds Expo Router routes, `lib/` is currently empty).

@@ -108,3 +108,18 @@ func (h *Hub) serve(ctx context.Context, peerID string, ws *websocket.Conn, hell
 		}
 	}
 }
+
+// Broadcast queues m for every connected peer and returns how many accepted it.
+func (h *Hub) Broadcast(m protocol.Message) int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	n := 0
+	for _, c := range h.conns {
+		select {
+		case c.out <- m:
+			n++
+		default:
+		}
+	}
+	return n
+}

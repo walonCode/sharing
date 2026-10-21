@@ -18,9 +18,11 @@ import (
 	"syscall"
 	"time"
 
+	"api/internal/clipboard"
 	"api/internal/config"
 	"api/internal/control"
 	"api/internal/discovery"
+	"api/internal/protocol"
 	"api/internal/server"
 	"api/internal/transfer"
 )
@@ -88,6 +90,13 @@ func run() error {
 	go func() {
 		errc <- discovery.Advertise(ctx, discovery.Info{ID: set.DeviceID, Name: set.Name, Fingerprint: config.Fingerprint(cert), Port: set.Port})
 	}()
+	if cb, err := clipboard.Detect(); err != nil {
+		log.Printf("clipboard sync disabled: %v", err)
+	} else {
+		sync := clipboard.NewSyncer(cb, srv.Hub)
+		srv.OnMessage = func(peerID string, m protocol.Message) { sync.HandleMessage(ctx, peerID, m) }
+		go sync.Run(ctx)
+	}
 	log.Printf("sharingd listening on %s as %q", httpSrv.Addr, store.Settings().Name)
 
 	select {
