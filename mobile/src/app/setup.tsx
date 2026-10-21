@@ -97,7 +97,7 @@ export default function Setup() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.intro}>
-        Set up once. Afterwards sharing and clipboard sync run in the background without opening this app. Received files are filed in a folder named after the sender: your laptop's name inside Downloads on this phone, and this phone's name on your laptop.
+        Set up once. Afterwards sharing and clipboard sync run in the background without opening this app. Received files are filed in a folder named after the sender: your the laptop&apos;s name inside Downloads on this phone, and this phone&apos;s name on your laptop.
       </Text>
 
       {busy ? <Text style={styles.hint}>Pairing…</Text> : null}
