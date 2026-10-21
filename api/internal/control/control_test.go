@@ -9,12 +9,13 @@ import (
 
 	"api/internal/config"
 	"api/internal/server"
+	"api/internal/transfer"
 )
 
 func TestInviteRedeemable(t *testing.T) {
 	store, _ := config.Open(t.TempDir())
 	srv := server.New(store)
-	ts := httptest.NewServer(Handler(srv, "fp123"))
+	ts := httptest.NewServer(Handler(srv, transfer.Mount(srv), "fp123"))
 	defer ts.Close()
 
 	resp, err := http.Post(ts.URL+"/invite", "application/json", nil)
