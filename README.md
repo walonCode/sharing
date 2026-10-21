@@ -20,6 +20,16 @@ Android 10+ does not let background apps read the clipboard, so phone → laptop
 
 ## Install
 
+### Quick start with make
+
+```bash
+make service   # build an optimised sharingd into ~/.local/bin and install the service
+make phone     # build the minified release APK and install it on the USB-connected phone
+make setup     # show the pairing QR
+```
+
+`make help` lists everything. Gradle needs JDK 17–21: set `JAVA_HOME=/path/to/jdk21` if your default is newer. The release APK is signed with the debug key, which is fine for installing on your own phone.
+
 ### Laptop (Linux)
 
 Requires Go, a clipboard tool (`wl-clipboard` on Wayland, or `xclip`/`xsel` on X11), and mDNS on your network (avahi).

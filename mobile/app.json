@@ -41,6 +41,16 @@
           "microphonePermission": false,
           "recordAudioAndroid": false
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "enableMinifyInReleaseBuilds": true,
+            "enableShrinkResourcesInReleaseBuilds": true,
+            "extraProguardRules": "-dontwarn org.apache.commons.compress.**\n-dontwarn org.tukaani.xz.**\n-dontwarn com.github.luben.zstd.**\n-dontwarn org.brotli.dec.**\n-dontwarn org.objectweb.asm.**\n-dontwarn org.conscrypt.**\n-dontwarn org.bouncycastle.**\n-dontwarn org.openjsse.**\n-keep class expo.modules.sharingservice.** { *; }"
+          }
+        }
       ]
     ],
     "experiments": {
