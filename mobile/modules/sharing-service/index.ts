@@ -20,6 +20,8 @@ declare class SharingServiceModule extends NativeModule<Events> {
   pickFolderToSend(): Promise<string | null>;
   start(): void;
   stop(): void;
+  /** Prompts to add the "Send clipboard" quick-settings tile; resolves "unsupported" before Android 13. */
+  requestAddClipboardTile(): Promise<string>;
   isBatteryOptimizationIgnored(): boolean;
   requestIgnoreBatteryOptimization(): void;
 }

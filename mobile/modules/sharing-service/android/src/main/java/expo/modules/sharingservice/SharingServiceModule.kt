@@ -74,6 +74,21 @@ class SharingServiceModule : Module() {
       SharingService.stop(ctx)
     }
 
+    // Asks the system to add the "Send clipboard" quick-settings tile (Android 13+); older versions add it by hand.
+    AsyncFunction("requestAddClipboardTile") { promise: Promise ->
+      if (Build.VERSION.SDK_INT < 33) {
+        promise.resolve("unsupported")
+        return@AsyncFunction
+      }
+      val manager = ctx.getSystemService(android.app.StatusBarManager::class.java)
+      manager.requestAddTileService(
+        android.content.ComponentName(ctx, ClipTileService::class.java),
+        "Send clipboard",
+        android.graphics.drawable.Icon.createWithResource(ctx, android.R.drawable.ic_menu_send),
+        ctx.mainExecutor,
+      ) { result -> promise.resolve(result.toString()) }
+    }
+
     Function("isBatteryOptimizationIgnored") {
       (ctx.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(ctx.packageName)
     }
