@@ -60,6 +60,7 @@ class ClipWatcher(private val ctx: Context, private val onText: (String) -> Unit
     stopped = true
     try { cm.removePrimaryClipChangedListener(listener) } catch (_: Exception) {}
     logcat?.destroy()
+    Status.logActive = null
   }
 
   /** Debounced: one copy can log several lines. */
@@ -76,10 +77,17 @@ class ClipWatcher(private val ctx: Context, private val onText: (String) -> Unit
       // -T 1: only lines logged from now on. Filtering happens here so a different tag on other builds still matches.
       val p = ProcessBuilder("logcat", "-T", "1", "-v", "brief").redirectErrorStream(true).start()
       logcat = p
+      Status.logActive = null
+      // Android logs constantly. If nothing from other apps shows up soon, the system has not granted log access
+      // to this process (consent is per session and is only asked for while the app is in the foreground).
+      main.postDelayed({
+        if (!stopped && Status.logActive == null) { Status.logActive = false; Status.changed() }
+      }, 8_000)
       BufferedReader(InputStreamReader(p.inputStream)).use { r ->
         while (!stopped) {
           val line = r.readLine() ?: break
-          if (line.contains("lipboard", ignoreCase = true) && line.contains(ctx.packageName) && !line.contains(TAG)) {
+          if (Status.logActive != true && !line.contains(TAG)) { Status.logActive = true; Status.changed() }
+          if (isClipboardChange(line)) {
             Log.d(TAG, "log trigger: ${line.take(160)}")
             changed()
           }
@@ -88,6 +96,20 @@ class ClipWatcher(private val ctx: Context, private val onText: (String) -> Unit
     } catch (e: Exception) {
       Log.w(TAG, "log watcher stopped: $e")
     }
+  }
+
+  /**
+   * Log lines that mean "the clipboard just changed":
+   *  - AOSP: ClipboardService denying us access (it is dispatching the change to our listener).
+   *  - Samsung One UI: copies made in other apps log "Copy toast is shown by <uid>" and do not
+   *    log a denial for us at all (observed on Android 16), so that line is the reliable signal.
+   * Our own log output is excluded.
+   */
+  private fun isClipboardChange(line: String): Boolean {
+    if (line.contains(TAG)) return false
+    val denied = line.contains("Denying clipboard access to ${ctx.packageName}")
+    val samsungCopy = line.contains("SemClipboardToastController") && line.contains("Copy toast is shown")
+    return denied || samsungCopy
   }
 
   private fun readDirect(): String? = try {

@@ -95,6 +95,7 @@ class SharingServiceModule : Module() {
         "enabled" to Prefs(ctx).autoClipboard,
         "overlay" to Settings.canDrawOverlays(ctx),
         "logs" to ClipWatcher.hasReadLogs(ctx),
+        "logActive" to Status.logActive,
       )
     }
     Function("setAutoClipboard") { enabled: Boolean ->

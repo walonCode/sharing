@@ -7,6 +7,8 @@ export type ClipboardAccess = {
   overlay: boolean;
   /** READ_LOGS was granted over adb. */
   logs: boolean;
+  /** Android is letting the service read the log right now (null = still checking). When false, open the app to be asked. */
+  logActive: boolean | null;
 };
 
 export type SharingStatus = {

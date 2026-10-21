@@ -18,7 +18,9 @@ export default function Setup() {
   const [message, setMessage] = useState<string | null>(null);
   const [notificationsOk, setNotificationsOk] = useState(false);
   const [tileAdded, setTileAdded] = useState(false);
-  const [access, setAccess] = useState(() => SharingService.clipboardAccess());
+  // Read fresh on every render; status events from the service and returning to the app both re-render this screen.
+  const [, setTick] = useState(0);
+  const access = SharingService.clipboardAccess();
   const [batteryOk, setBatteryOk] = useState(() => SharingService.isBatteryOptimizationIgnored());
 
   const pairRef = useRef<(raw: string) => void>(() => {});
@@ -44,7 +46,7 @@ export default function Setup() {
   // Permissions are changed outside the app (system settings, adb), so re-read them when we come back.
   useEffect(() => {
     const sub = AppState.addEventListener("change", (state) => {
-      if (state === "active") setAccess(SharingService.clipboardAccess());
+      if (state === "active") setTick((t) => t + 1);
     });
     return () => sub.remove();
   }, []);
@@ -167,6 +169,17 @@ export default function Setup() {
             adb shell pm grant com.walon.sharing android.permission.READ_LOGS
           </Text>
         ) : null}
+        {access.enabled && access.logActive === false ? (
+          <>
+            <Text style={styles.error}>
+              Android hasn&apos;t allowed log access in this session, so copies aren&apos;t being noticed. Tap below and choose “Allow one-time
+              access” when Android asks.
+            </Text>
+            <Button label="Ask for log access again" onPress={() => SharingService.setAutoClipboard(true)} />
+          </>
+        ) : access.enabled && access.logActive ? (
+          <Text style={styles.hint}>✓ Watching for copies</Text>
+        ) : null}
         <View style={styles.row}>
           <Text style={styles.stepTitle}>Copy automatically</Text>
           <Switch
@@ -174,7 +187,7 @@ export default function Setup() {
             disabled={!(access.overlay && access.logs)}
             onValueChange={(on) => {
               SharingService.setAutoClipboard(on);
-              setAccess(SharingService.clipboardAccess());
+              setTick((t) => t + 1);
             }}
           />
         </View>
