@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"github.com/skip2/go-qrcode"
@@ -90,6 +91,9 @@ func run() error {
 	}
 	sock, err := control.Listen(control.SocketPath())
 	if err != nil {
+		if errors.Is(err, control.ErrAlreadyRunning) {
+			return fmt.Errorf("%w (check: systemctl --user status sharingd)", err)
+		}
 		return err
 	}
 	ctrl := &http.Server{Handler: control.Handler(srv, svc, config.Fingerprint(cert))}
