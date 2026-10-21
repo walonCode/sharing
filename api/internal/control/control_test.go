@@ -61,3 +61,30 @@ func TestSettingsEndpoint(t *testing.T) {
 		t.Fatalf("receiveDir = %q", got)
 	}
 }
+
+func TestUnpairRevokesAccess(t *testing.T) {
+	store, _ := config.Open(t.TempDir())
+	srv := server.New(store)
+	_ = store.AddPeer(config.Peer{ID: "p1", Name: "pixel", TokenHash: "h"})
+	ts := httptest.NewServer(Handler(srv, transfer.Mount(srv), "fp"))
+	defer ts.Close()
+
+	del := func(id string) int {
+		req, _ := http.NewRequest("DELETE", ts.URL+"/peers/"+id, nil)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := del("nope"); code != http.StatusNotFound {
+		t.Fatalf("unknown peer = %d", code)
+	}
+	if code := del("pixel"); code != http.StatusNoContent { // by name
+		t.Fatalf("unpair = %d", code)
+	}
+	if len(store.Peers()) != 0 {
+		t.Fatal("peer still stored")
+	}
+}
