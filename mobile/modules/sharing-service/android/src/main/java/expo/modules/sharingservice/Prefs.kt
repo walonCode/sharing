@@ -1,7 +1,6 @@
 package expo.modules.sharingservice
 
 import android.content.Context
-import android.net.Uri
 import java.util.UUID
 
 /** Everything the background service needs, persisted so it works with no JS running. */
@@ -38,10 +37,6 @@ class Prefs(ctx: Context) {
   var lastPort: Int
     get() = sp.getInt("lastPort", 53317)
     set(v) = sp.edit().putInt("lastPort", v).apply()
-
-  var treeUri: Uri?
-    get() = sp.getString("treeUri", null)?.let(Uri::parse)
-    set(v) = sp.edit().putString("treeUri", v?.toString()).apply()
 
   /** User wants the service running (survives reboot). */
   var enabled: Boolean

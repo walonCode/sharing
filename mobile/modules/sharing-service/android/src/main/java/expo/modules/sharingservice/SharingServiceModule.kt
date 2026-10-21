@@ -7,13 +7,11 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
-import androidx.documentfile.provider.DocumentFile
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
-private const val PICK_RECEIVE = 7101
 private const val PICK_SEND = 7102
 
 /** Thin JS bridge. All real work lives in the service so it runs without JS. */
@@ -27,7 +25,6 @@ class SharingServiceModule : Module() {
     return mapOf(
       "paired" to prefs.paired,
       "laptopName" to prefs.laptopName,
-      "folder" to prefs.treeUri?.let { DocumentFile.fromTreeUri(ctx, it)?.name },
       "running" to Status.running,
       "connected" to Status.connected,
       "error" to Status.lastError,
@@ -66,19 +63,6 @@ class SharingServiceModule : Module() {
       status()
     }
 
-    // Laptop folder browsing; each returns the laptop's JSON response as a string.
-    AsyncFunction("listLaptopFolders") { path: String ->
-      Net.laptop(Prefs(ctx), "GET", "/fs?path=" + java.net.URLEncoder.encode(path, "UTF-8"))
-    }
-    AsyncFunction("createLaptopFolder") { parent: String, name: String ->
-      Net.laptop(Prefs(ctx), "POST", "/fs/mkdir", org.json.JSONObject().put("parent", parent).put("name", name))
-    }
-    AsyncFunction("setLaptopReceiveFolder") { path: String ->
-      Net.laptop(Prefs(ctx), "PUT", "/settings", org.json.JSONObject().put("receiveDir", path))
-    }
-    AsyncFunction("getLaptopSettings") { Net.laptop(Prefs(ctx), "GET", "/settings") }
-
-    AsyncFunction("pickReceiveFolder") { promise: Promise -> pickTree(PICK_RECEIVE, promise) }
     AsyncFunction("pickFolderToSend") { promise: Promise -> pickTree(PICK_SEND, promise) }
 
     Function("start") {
@@ -100,7 +84,7 @@ class SharingServiceModule : Module() {
     }
 
     OnActivityResult { _, payload ->
-      if (payload.requestCode != PICK_RECEIVE && payload.requestCode != PICK_SEND) return@OnActivityResult
+      if (payload.requestCode != PICK_SEND) return@OnActivityResult
       val promise = pending ?: return@OnActivityResult
       pending = null
       val uri = payload.data?.data
@@ -108,16 +92,9 @@ class SharingServiceModule : Module() {
         promise.resolve(null)
         return@OnActivityResult
       }
-      val rw = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-      ctx.contentResolver.takePersistableUriPermission(uri, rw)
-      if (payload.requestCode == PICK_RECEIVE) {
-        Prefs(ctx).treeUri = uri
-        Status.changed()
-      } else {
-        SharingService.send(ctx, SharingService.ACTION_UPLOAD_TREE) {
-          data = uri
-          addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
+      SharingService.send(ctx, SharingService.ACTION_UPLOAD_TREE) {
+        data = uri
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
       }
       promise.resolve(uri.toString())
     }

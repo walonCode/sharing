@@ -1,6 +1,10 @@
 package expo.modules.sharingservice
 
+import android.content.ContentValues
 import android.content.Context
+import android.net.Uri
+import android.os.Environment
+import android.provider.MediaStore
 import android.webkit.MimeTypeMap
 import androidx.documentfile.provider.DocumentFile
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
@@ -9,85 +13,93 @@ import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 
-/** Reads and writes the user-chosen receive folder through the Storage Access Framework. */
+/** Receives into Downloads/<laptop name> via MediaStore; reads a user-picked folder (SAF) when sending one. */
 object Storage {
   fun sanitize(name: String): String {
     val n = name.replace('\\', '/').substringAfterLast('/').trim()
     return if (n.isEmpty() || n == "." || n == "..") "file" else n
   }
 
-  fun uniqueName(dir: DocumentFile, name: String): String {
-    if (dir.findFile(name) == null) return name
-    val dot = name.lastIndexOf('.').takeIf { it > 0 } ?: name.length
-    val base = name.substring(0, dot)
-    val ext = name.substring(dot)
-    var i = 1
-    while (dir.findFile("$base ($i)$ext") != null) i++
-    return "$base ($i)$ext"
-  }
-
   private fun mimeFor(name: String): String =
     MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase())
       ?: "application/octet-stream"
 
-  fun root(ctx: Context, prefs: Prefs): DocumentFile {
-    val uri = prefs.treeUri ?: error("No receive folder chosen")
-    val dir = DocumentFile.fromTreeUri(ctx, uri)
-    if (dir == null || !dir.canWrite()) error("Receive folder is no longer accessible; pick it again")
-    return dir
+  private val downloads = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+
+  /** "Download/<laptop>/<sub>/" — MediaStore creates the folders on demand and needs no permission for our own files. */
+  private fun relativePath(laptop: String, vararg sub: String): String =
+    (listOf(Environment.DIRECTORY_DOWNLOADS, sanitize(laptop)) + sub.toList()).joinToString("/") + "/"
+
+  /** Creates a pending MediaStore entry; MediaStore itself renames on collision ("name (1).ext"). */
+  private fun insert(ctx: Context, relPath: String, name: String): Uri {
+    val values = ContentValues().apply {
+      put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+      put(MediaStore.MediaColumns.MIME_TYPE, mimeFor(name))
+      put(MediaStore.MediaColumns.RELATIVE_PATH, relPath)
+      put(MediaStore.MediaColumns.IS_PENDING, 1)
+    }
+    return ctx.contentResolver.insert(downloads, values) ?: error("Could not create $name in Downloads")
   }
 
-  fun saveFile(dir: DocumentFile, name: String, input: InputStream, ctx: Context): String {
-    val finalName = uniqueName(dir, sanitize(name))
-    val file = dir.createFile(mimeFor(finalName), finalName) ?: error("Could not create $finalName")
+  private fun publish(ctx: Context, uri: Uri) {
+    ctx.contentResolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+  }
+
+  private fun displayName(ctx: Context, uri: Uri, fallback: String): String =
+    ctx.contentResolver.query(uri, arrayOf(MediaStore.MediaColumns.DISPLAY_NAME), null, null, null)?.use {
+      if (it.moveToFirst()) it.getString(0) else null
+    } ?: fallback
+
+  /** Saves a file received from the laptop to Downloads/<laptop name>/. Returns the final file name. */
+  fun saveFile(ctx: Context, laptop: String, name: String, input: InputStream): String {
+    val clean = sanitize(name)
+    val uri = insert(ctx, relativePath(laptop), clean)
     try {
-      ctx.contentResolver.openOutputStream(file.uri)!!.use { input.copyTo(it) }
+      ctx.contentResolver.openOutputStream(uri)!!.use { input.copyTo(it) }
+      publish(ctx, uri)
     } catch (e: Exception) {
-      file.delete() // never leave a half-written file behind
+      ctx.contentResolver.delete(uri, null, null) // never leave a half-written file behind
       throw e
     }
-    return file.name ?: finalName
+    return displayName(ctx, uri, clean)
   }
 
-  /** Extracts a tar whose first path component is the folder name (as sharingd sends it). */
-  fun untar(dir: DocumentFile, rootName: String, input: InputStream, ctx: Context): String {
-    val rootDirName = uniqueName(dir, sanitize(rootName))
-    val root = dir.createDirectory(rootDirName) ?: error("Could not create $rootDirName")
-    val dirs = HashMap<String, DocumentFile>().apply { put("", root) }
+  private fun folderExists(ctx: Context, relPath: String): Boolean =
+    ctx.contentResolver.query(
+      downloads, arrayOf(MediaStore.MediaColumns._ID),
+      "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?", arrayOf("$relPath%"), null,
+    )?.use { it.moveToFirst() } ?: false
 
-    fun dirFor(parts: List<String>): DocumentFile {
-      var key = ""
-      var cur = root
-      for (p in parts) {
-        key = if (key.isEmpty()) p else "$key/$p"
-        cur = dirs.getOrPut(key) { cur.findFile(p) ?: cur.createDirectory(p) ?: error("Could not create $p") }
-      }
-      return cur
-    }
+  /**
+   * Extracts a tar whose first path component is the folder name (as sharingd sends it)
+   * into Downloads/<laptop name>/<folder>/. Returns the folder name used. Empty folders
+   * are not recreated (MediaStore only knows files).
+   */
+  fun untar(ctx: Context, laptop: String, rootName: String, input: InputStream): String {
+    val base = sanitize(rootName)
+    var folder = base
+    var n = 1
+    while (folderExists(ctx, relativePath(laptop, folder))) folder = "$base (${n++})"
 
+    val created = ArrayList<Uri>()
     try {
       TarArchiveInputStream(input).use { tar ->
         while (true) {
           val e = tar.nextEntry ?: break
           val parts = e.name.replace('\\', '/').split('/').filter { it.isNotEmpty() }.drop(1)
-          if (parts.isEmpty()) continue
+          if (parts.isEmpty() || !e.isFile) continue
           require(parts.none { it == ".." || it == "." }) { "Unsafe path in archive" }
-          when {
-            e.isDirectory -> dirFor(parts)
-            e.isFile -> {
-              val parent = dirFor(parts.dropLast(1))
-              val name = uniqueName(parent, parts.last())
-              val file = parent.createFile(mimeFor(name), name) ?: error("Could not create $name")
-              ctx.contentResolver.openOutputStream(file.uri)!!.use { tar.copyTo(it) }
-            }
-          }
+          val uri = insert(ctx, relativePath(laptop, folder, *parts.dropLast(1).toTypedArray()), parts.last())
+          created.add(uri)
+          ctx.contentResolver.openOutputStream(uri)!!.use { tar.copyTo(it) }
         }
       }
+      created.forEach { publish(ctx, it) }
     } catch (ex: Exception) {
-      root.delete()
+      created.forEach { ctx.contentResolver.delete(it, null, null) }
       throw ex
     }
-    return rootDirName
+    return folder
   }
 
   /** Streams [folder] as a tar rooted at its own name. */
