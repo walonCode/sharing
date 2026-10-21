@@ -3,6 +3,8 @@ import * as Device from "expo-device";
 import { router, useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PermissionsAndroid, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ErrorBanner } from "../components/ErrorBanner";
+import { friendlyError } from "../lib/errors";
 import { parseInvite } from "../lib/invite";
 import { getReceiveFolder } from "../lib/laptop";
 import { SharingService, useSharingStatus } from "../lib/sharing";
@@ -23,7 +25,7 @@ export default function Setup() {
   async function pair(raw: string) {
     const invite = parseInvite(raw);
     if (!invite) {
-      setMessage("That is not a sharing pairing link. Run `sharingd setup` on your laptop and scan its QR.");
+      setMessage(friendlyError(new Error("Not a sharing pairing link")));
       return;
     }
     setBusy(true);
@@ -32,7 +34,7 @@ export default function Setup() {
       await SharingService.pair(raw.trim(), Device.deviceName ?? Device.modelName ?? "Android phone");
       setScanning(false);
     } catch (e) {
-      setMessage(e instanceof Error ? e.message : String(e));
+      setMessage(friendlyError(e));
     } finally {
       setBusy(false);
     }
@@ -108,6 +110,9 @@ export default function Setup() {
         Set up once. Afterwards sharing and clipboard sync run in the background without opening this app.
       </Text>
 
+      {busy ? <Text style={styles.hint}>Pairing…</Text> : null}
+      {message ? <ErrorBanner title="Couldn't pair" message={message} onDismiss={() => setMessage(null)} /> : null}
+
       <Step n={1} title="Pair with your laptop" done={status.paired} doneText={`Paired with ${status.laptopName}`}>
         <Text style={styles.hint}>On the laptop run `sharingd setup`, then scan the QR.</Text>
         <Button label="Scan QR" onPress={openScanner} disabled={busy} />
@@ -142,8 +147,6 @@ export default function Setup() {
           }}
         />
       </Step>
-
-      {message ? <Text style={styles.error}>{message}</Text> : null}
 
       <Button
         label="Finish and start"

@@ -1,6 +1,8 @@
 import { router } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { ErrorBanner } from "../components/ErrorBanner";
+import { friendlyError } from "../lib/errors";
 import { createFolder, type FolderListing, listFolders, setReceiveFolder } from "../lib/laptop";
 
 /** Browse the laptop's folders from the phone and choose where received files land. */
@@ -16,7 +18,7 @@ export default function LaptopFolder() {
       setListing(next);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyError(e));
     }
   }, []);
 
@@ -28,7 +30,7 @@ export default function LaptopFolder() {
         setListing(first);
         setHome(first.path); // the first listing is the laptop's home
       },
-      (e) => !cancelled && setError(e instanceof Error ? e.message : String(e)),
+      (e) => !cancelled && setError(friendlyError(e)),
     );
     return () => {
       cancelled = true;
@@ -40,7 +42,7 @@ export default function LaptopFolder() {
       await setReceiveFolder(path);
       router.back();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyError(e));
     }
   }
 
@@ -51,7 +53,7 @@ export default function LaptopFolder() {
       setNewName("");
       await open(path);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(friendlyError(e));
     }
   }
 
@@ -69,7 +71,7 @@ export default function LaptopFolder() {
   return (
     <View style={styles.container}>
       <Text style={styles.path}>{shown}</Text>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {error ? <ErrorBanner title="Couldn't reach the laptop" message={error} onDismiss={() => setError(null)} /> : null}
       <Button label={`Save received files in ${shown}`} onPress={() => choose(listing.path)} />
       <View style={styles.row}>
         <TextInput style={[styles.input, styles.flex]} placeholder="New folder name" value={newName} onChangeText={setNewName} />

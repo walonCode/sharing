@@ -55,12 +55,14 @@ class SharingServiceModule : Module() {
 
     AsyncFunction("pair") { inviteUrl: String, deviceName: String ->
       Net.pair(Prefs(ctx), Invite.parse(inviteUrl), deviceName)
+      Status.changed() // tell JS; otherwise the UI keeps showing "not paired"
       status()
     }
 
     AsyncFunction("unpair") {
       SharingService.stop(ctx)
       Prefs(ctx).apply { clearPairing(); enabled = false }
+      Status.changed()
       status()
     }
 
