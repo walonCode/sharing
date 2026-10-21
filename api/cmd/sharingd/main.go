@@ -16,6 +16,7 @@ import (
 
 	"api/internal/config"
 	"api/internal/control"
+	"api/internal/discovery"
 	"api/internal/server"
 )
 
@@ -70,13 +71,17 @@ func run() error {
 	}
 	ctrl := &http.Server{Handler: control.Handler(srv, config.Fingerprint(cert))}
 
-	errc := make(chan error, 2)
+	errc := make(chan error, 3)
 	go func() { errc <- httpSrv.ListenAndServeTLS("", "") }()
 	go func() { errc <- ctrl.Serve(sock) }()
-	log.Printf("sharingd listening on %s as %q", httpSrv.Addr, store.Settings().Name)
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	set := store.Settings()
+	go func() {
+		errc <- discovery.Advertise(ctx, discovery.Info{ID: set.DeviceID, Name: set.Name, Fingerprint: config.Fingerprint(cert), Port: set.Port})
+	}()
+	log.Printf("sharingd listening on %s as %q", httpSrv.Addr, store.Settings().Name)
+
 	select {
 	case <-ctx.Done():
 	case err := <-errc:
