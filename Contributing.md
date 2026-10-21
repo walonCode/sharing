@@ -13,6 +13,8 @@ Commit messages should say what changed and why: a short imperative summary line
 
 ## Setup and checks
 
+The `Makefile` wraps the common tasks (`make help`): `make test` runs every check for both projects, `make service` builds and installs the daemon, `make phone` builds the release APK and installs it on a USB-connected phone, and `make phone-quick` is a fast rebuild that reuses the generated `mobile/android` (use `make apk` or `make phone` after changing `app.json`, plugins, or native dependencies). Gradle needs JDK 17-21: pass `JAVA_HOME=/path/to/jdk21`.
+
 ### Laptop daemon (`api/`)
 
 ```bash
@@ -47,7 +49,9 @@ Things to know:
 - Expo changes between SDK releases. Check the docs for the SDK version in `package.json` before using an API; add packages with `bunx expo install <pkg>`.
 - The background service must work with no JavaScript running, so logic belongs in Kotlin (`mobile/modules/sharing-service`). The module's JS surface stays thin.
 - `mobile/android/` is generated and not committed.
-- Android 10+ restrictions (clipboard reads, foreground-service types) shape the design; see `docs/plan2.md` before changing them.
+- Android 10+ restrictions (clipboard reads, foreground-service types) shape the design; see `docs/plan2.md` before changing them. The optional automatic clipboard (`ClipWatcher.kt`) depends on system log wording that differs between AOSP and Samsung; test it on a real device and read the README section before changing it.
+- Kotlin changes cannot be fully verified by compiling. If you touch the service, install it on a phone (`make phone-quick`) and check `sharingd peers`, a transfer each way, and the clipboard. `adb logcat -s SharingClip` shows the clipboard watcher.
+- `docs/plan1.md` and `docs/plan2.md` are the original build plans. The README is the source of truth for how things work today.
 
 ## Guidelines
 
