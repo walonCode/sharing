@@ -6,7 +6,9 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"flag"
 	"fmt"
+	"github.com/skip2/go-qrcode"
 	"io"
 	"log"
 	"net/http"
@@ -24,6 +26,7 @@ import (
 	"api/internal/discovery"
 	"api/internal/protocol"
 	"api/internal/server"
+	"api/internal/service"
 	"api/internal/transfer"
 )
 
@@ -38,12 +41,18 @@ func main() {
 		err = run()
 	case "pair":
 		err = pair()
+	case "setup":
+		err = setup(os.Args[2:])
+	case "install":
+		err = install()
+	case "uninstall":
+		err = service.Uninstall()
 	case "send":
 		err = send(os.Args[2:])
 	case "peers":
 		err = peers()
 	default:
-		err = fmt.Errorf("unknown command %q (run, pair, peers, send)", cmd)
+		err = fmt.Errorf("unknown command %q (run, pair, peers, send, setup, install, uninstall)", cmd)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "sharingd:", err)
@@ -122,7 +131,10 @@ func pair() error {
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return err
 	}
-	fmt.Println("Open the app on your phone and enter this pairing link (valid 5 minutes):")
+	fmt.Println("Scan this in the app, or paste the link (valid 5 minutes):")
+	if qr, err := qrcode.New(out.URL, qrcode.Low); err == nil {
+		fmt.Println(qr.ToSmallString(false))
+	}
 	fmt.Println(out.URL)
 	return nil
 }
@@ -184,5 +196,52 @@ func send(args []string) error {
 		}
 		fmt.Println("offered", abs)
 	}
+	return nil
+}
+
+// setup stores the receive folder (and optionally the device name), then shows
+// a pairing QR. It edits the running daemon through the control socket.
+func setup(args []string) error {
+	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
+	dir := fs.String("dir", "", "folder where received files are saved")
+	name := fs.String("name", "", "device name shown on the phone")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *dir != "" {
+		abs, err := filepath.Abs(*dir)
+		if err != nil {
+			return err
+		}
+		*dir = abs
+		if err := os.MkdirAll(abs, 0o755); err != nil {
+			return err
+		}
+	}
+	if *dir != "" || *name != "" {
+		body, _ := json.Marshal(control.SettingsRequest{ReceiveDir: *dir, Name: *name})
+		resp, err := control.Client(control.SocketPath()).Post("http://sharingd/settings", "application/json", bytes.NewReader(body))
+		if err != nil {
+			return fmt.Errorf("daemon not running; run `sharingd install` first: %w", err)
+		}
+		msg, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("%s", strings.TrimSpace(string(msg)))
+		}
+		fmt.Println("saved settings")
+	}
+	return pair()
+}
+
+// install registers sharingd as a systemd user service that starts at login.
+func install() error {
+	path, err := service.Install()
+	if err != nil {
+		return err
+	}
+	fmt.Println("installed and started", path)
+	fmt.Println("To keep it running when you are logged out: loginctl enable-linger $USER")
+	fmt.Println("Next: sharingd setup --dir ~/Downloads/Sharing")
 	return nil
 }

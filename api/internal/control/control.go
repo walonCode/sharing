@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"api/internal/config"
 	"api/internal/pairing"
 	"api/internal/server"
 	"api/internal/transfer"
@@ -46,6 +47,13 @@ func resolvePeer(srv *server.Server, want string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no paired peer %q", want)
+}
+
+// SettingsRequest changes settings on a running daemon; empty fields are left alone.
+// A new Name takes effect for mDNS after the daemon restarts.
+type SettingsRequest struct {
+	ReceiveDir string `json:"receiveDir,omitempty"`
+	Name       string `json:"name,omitempty"`
 }
 
 type InviteResponse struct {
@@ -86,6 +94,30 @@ func Handler(srv *server.Server, svc *transfer.Service, fp string) http.Handler 
 			return
 		}
 		w.WriteHeader(http.StatusAccepted)
+	})
+	mux.HandleFunc("POST /settings", func(w http.ResponseWriter, r *http.Request) {
+		var req SettingsRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if req.ReceiveDir != "" && !filepath.IsAbs(req.ReceiveDir) {
+			http.Error(w, "receiveDir must be an absolute path", http.StatusBadRequest)
+			return
+		}
+		err := srv.Store.UpdateSettings(func(s *config.Settings) {
+			if req.ReceiveDir != "" {
+				s.ReceiveDir = req.ReceiveDir
+			}
+			if req.Name != "" {
+				s.Name = req.Name
+			}
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, srv.Store.Settings())
 	})
 	mux.HandleFunc("GET /peers", func(w http.ResponseWriter, r *http.Request) {
 		type peer struct {

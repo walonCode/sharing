@@ -4,8 +4,10 @@ package clipboard
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -46,6 +48,7 @@ func (b execBackend) Write(ctx context.Context, text string) error {
 // Detect picks Wayland (wl-clipboard) when a Wayland session is active, then
 // xclip, then xsel.
 func Detect() (Backend, error) {
+	adoptWaylandSocket()
 	if os.Getenv("WAYLAND_DISPLAY") != "" {
 		if _, err := exec.LookPath("wl-paste"); err == nil {
 			return execBackend{read: []string{"wl-paste", "--no-newline", "--type", "text/plain"}, write: []string{"wl-copy", "--type", "text/plain"}}, nil
@@ -58,4 +61,24 @@ func Detect() (Backend, error) {
 		return execBackend{read: []string{"xsel", "--clipboard", "--output"}, write: []string{"xsel", "--clipboard", "--input"}}, nil
 	}
 	return nil, ErrNoBackend
+}
+
+// adoptWaylandSocket sets WAYLAND_DISPLAY (and XDG_RUNTIME_DIR) from the
+// runtime dir when started by systemd before the session exported them.
+func adoptWaylandSocket() {
+	if os.Getenv("WAYLAND_DISPLAY") != "" {
+		return
+	}
+	dir := os.Getenv("XDG_RUNTIME_DIR")
+	if dir == "" {
+		dir = fmt.Sprintf("/run/user/%d", os.Getuid())
+	}
+	socks, _ := filepath.Glob(filepath.Join(dir, "wayland-[0-9]*"))
+	for _, sock := range socks {
+		if !strings.HasSuffix(sock, ".lock") {
+			os.Setenv("XDG_RUNTIME_DIR", dir)
+			os.Setenv("WAYLAND_DISPLAY", filepath.Base(sock))
+			return
+		}
+	}
 }
