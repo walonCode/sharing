@@ -14,9 +14,11 @@ Requires Go, `wl-clipboard` (Wayland) or `xclip`/`xsel` (X11), and avahi/mDNS on
 cd api
 go build -o ~/.local/bin/sharingd ./cmd/sharingd
 sharingd install                          # systemd user service, starts at login
-sharingd setup --dir ~/Downloads/Sharing  # receive folder, then shows a pairing QR
+sharingd setup                            # shows a pairing QR (receive folder defaults to ~/Downloads/Sharing)
 loginctl enable-linger $USER              # optional: keep running while logged out
 ```
+
+Both receive folders are chosen from the phone during setup: it picks its own folder, and browses the laptop's folders (limited to your home directory) to choose where the laptop saves files. `sharingd setup --dir <path>` still works to set the laptop folder from the terminal.
 
 Other commands: `sharingd pair` (new QR), `sharingd peers`, `sharingd send [--to peer] <path>...`, `sharingd uninstall`.
 

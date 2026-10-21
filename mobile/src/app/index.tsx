@@ -17,7 +17,7 @@ export default function Home() {
     <View style={styles.container}>
       <Text style={styles.state}>{state}</Text>
       {status.error ? <Text style={styles.error}>{status.error}</Text> : null}
-      <Text style={styles.hint}>Saving to: {status.folder}</Text>
+      <Text style={styles.hint}>Phone saves to: {status.folder}</Text>
       <Text style={styles.hint}>
         You can close this app. Share from any app with “Send to laptop”, or use the “Send clipboard” quick-settings tile.
       </Text>
@@ -27,7 +27,8 @@ export default function Home() {
         onPress={() => (status.running ? SharingService.stop() : SharingService.start())}
       />
       <Button label="Send a folder to laptop" onPress={() => SharingService.pickFolderToSend()} />
-      <Button label="Change receive folder" onPress={() => SharingService.pickReceiveFolder()} />
+      <Button label="Change laptop folder" onPress={() => router.push("/laptop-folder")} />
+      <Button label="Change phone folder" onPress={() => SharingService.pickReceiveFolder()} />
       <Button
         label="Unpair"
         danger
