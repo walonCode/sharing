@@ -17,6 +17,7 @@ export default function Setup() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [notificationsOk, setNotificationsOk] = useState(false);
+  const [tileAdded, setTileAdded] = useState(false);
   const [batteryOk, setBatteryOk] = useState(() => SharingService.isBatteryOptimizationIgnored());
 
   const pairRef = useRef<(raw: string) => void>(() => {});
@@ -124,6 +125,21 @@ export default function Setup() {
           onPress={() => {
             SharingService.requestIgnoreBatteryOptimization();
             setTimeout(() => setBatteryOk(SharingService.isBatteryOptimizationIgnored()), 1500);
+          }}
+        />
+      </Step>
+
+      <Step n={3} title="Copy from phone to laptop" done={tileAdded} doneText="Tile added" disabled={!status.paired}>
+        <Text style={styles.hint}>
+          Android stops apps reading the clipboard in the background, so phone to laptop copying takes one tap: copy as usual, then tap
+          “Send clipboard” on the tile or in the notification. Laptop to phone is automatic.
+        </Text>
+        <Button
+          label="Add “Send clipboard” tile"
+          onPress={async () => {
+            const result = await SharingService.requestAddClipboardTile();
+            setTileAdded(result !== "unsupported" && !/not_added|error/i.test(result));
+            if (result === "unsupported") setMessage("Pull down Quick Settings, tap the pencil, and drag “Send clipboard” in.");
           }}
         />
       </Step>
