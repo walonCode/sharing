@@ -28,7 +28,7 @@ make phone     # build the minified release APK and install it on the USB-connec
 make setup     # show the pairing QR
 ```
 
-`make help` lists everything. Gradle needs JDK 17–21: set `JAVA_HOME=/path/to/jdk21` if your default is newer. The release APK is signed with the debug key, which is fine for installing on your own phone.
+`make help` lists everything. The APK is built for arm64 phones only (about 40 MB); use `make phone ABIS=arm64-v8a,armeabi-v7a,x86_64` for other CPUs. Gradle needs JDK 17–21: set `JAVA_HOME=/path/to/jdk21` if your default is newer. The release APK is signed with the debug key, which is fine for installing on your own phone.
 
 ### Laptop (Linux)
 
