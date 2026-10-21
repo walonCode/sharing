@@ -4,6 +4,8 @@ package control
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -12,6 +14,7 @@ import (
 
 	"api/internal/pairing"
 	"api/internal/server"
+	"api/internal/transfer"
 )
 
 // SocketPath lives in the runtime dir so only the user can reach it.
@@ -23,12 +26,34 @@ func SocketPath() string {
 	return filepath.Join(dir, "sharingd.sock")
 }
 
+type SendRequest struct {
+	Path string `json:"path"`
+	Peer string `json:"peer,omitempty"` // device id or name; optional with one peer
+}
+
+// resolvePeer picks the target peer: by id/name, or the only one paired.
+func resolvePeer(srv *server.Server, want string) (string, error) {
+	peers := srv.Store.Peers()
+	if want == "" {
+		if len(peers) == 1 {
+			return peers[0].ID, nil
+		}
+		return "", fmt.Errorf("%d paired peers; pass --to <id or name>", len(peers))
+	}
+	for _, p := range peers {
+		if p.ID == want || p.Name == want {
+			return p.ID, nil
+		}
+	}
+	return "", fmt.Errorf("no paired peer %q", want)
+}
+
 type InviteResponse struct {
 	URL string `json:"url"`
 }
 
 // Handler serves control requests for srv; fp is the pinned certificate fingerprint.
-func Handler(srv *server.Server, fp string) http.Handler {
+func Handler(srv *server.Server, svc *transfer.Service, fp string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /invite", func(w http.ResponseWriter, r *http.Request) {
 		set := srv.Store.Settings()
@@ -40,6 +65,27 @@ func Handler(srv *server.Server, fp string) http.Handler {
 			Name:        set.Name,
 		}
 		writeJSON(w, InviteResponse{URL: inv.URL()})
+	})
+	mux.HandleFunc("POST /send", func(w http.ResponseWriter, r *http.Request) {
+		var req SendRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Path == "" {
+			http.Error(w, "path required", http.StatusBadRequest)
+			return
+		}
+		peerID, err := resolvePeer(srv, req.Peer)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if _, err := svc.Send(peerID, req.Path); err != nil {
+			code := http.StatusBadRequest
+			if errors.Is(err, transfer.ErrPeerOffline) {
+				code = http.StatusConflict
+			}
+			http.Error(w, err.Error(), code)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
 	})
 	mux.HandleFunc("GET /peers", func(w http.ResponseWriter, r *http.Request) {
 		type peer struct {

@@ -2,15 +2,19 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -18,6 +22,7 @@ import (
 	"api/internal/control"
 	"api/internal/discovery"
 	"api/internal/server"
+	"api/internal/transfer"
 )
 
 func main() {
@@ -31,10 +36,12 @@ func main() {
 		err = run()
 	case "pair":
 		err = pair()
+	case "send":
+		err = send(os.Args[2:])
 	case "peers":
 		err = peers()
 	default:
-		err = fmt.Errorf("unknown command %q (run, pair, peers)", cmd)
+		err = fmt.Errorf("unknown command %q (run, pair, peers, send)", cmd)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "sharingd:", err)
@@ -59,6 +66,7 @@ func run() error {
 		return err
 	}
 	srv := server.New(store)
+	svc := transfer.Mount(srv)
 
 	httpSrv := &http.Server{
 		Addr:      ":" + strconv.Itoa(store.Settings().Port),
@@ -69,7 +77,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	ctrl := &http.Server{Handler: control.Handler(srv, config.Fingerprint(cert))}
+	ctrl := &http.Server{Handler: control.Handler(srv, svc, config.Fingerprint(cert))}
 
 	errc := make(chan error, 3)
 	go func() { errc <- httpSrv.ListenAndServeTLS("", "") }()
@@ -129,6 +137,43 @@ func peers() error {
 			state = "online"
 		}
 		fmt.Printf("%s\t%s\t%s\n", p.ID, p.Name, state)
+	}
+	return nil
+}
+
+// send asks the running daemon to offer a file or folder to a paired phone.
+// Usage: sharingd send [--to <id|name>] <path>...
+func send(args []string) error {
+	var to string
+	var paths []string
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--to" && i+1 < len(args) {
+			to = args[i+1]
+			i++
+			continue
+		}
+		paths = append(paths, args[i])
+	}
+	if len(paths) == 0 {
+		return fmt.Errorf("usage: sharingd send [--to <peer>] <path>...")
+	}
+	client := control.Client(control.SocketPath())
+	for _, p := range paths {
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			return err
+		}
+		body, _ := json.Marshal(control.SendRequest{Path: abs, Peer: to})
+		resp, err := client.Post("http://sharingd/send", "application/json", bytes.NewReader(body))
+		if err != nil {
+			return fmt.Errorf("is the daemon running? %w", err)
+		}
+		msg, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusAccepted {
+			return fmt.Errorf("%s: %s", p, strings.TrimSpace(string(msg)))
+		}
+		fmt.Println("offered", abs)
 	}
 	return nil
 }

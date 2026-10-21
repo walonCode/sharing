@@ -14,7 +14,7 @@ type Message struct {
 	// hello
 	Name string `json:"name,omitempty"`
 
-	// offer: client fetches GET /transfer/{ID}
+	// offer: client fetches GET /transfer/{ID}; Name is the file or folder name
 	ID   string `json:"id,omitempty"`
 	Kind string `json:"kind,omitempty"` // "file" or "dir"
 	Size int64  `json:"size,omitempty"`
