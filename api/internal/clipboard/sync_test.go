@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -112,4 +113,38 @@ func TestStartupContentNotBroadcast(t *testing.T) {
 	if r.count() != 0 {
 		t.Fatalf("startup clipboard leaked: %+v", r.sent)
 	}
+}
+
+func TestManagerWaitsForClipboardSession(t *testing.T) {
+	b, r := &fakeBackend{}, &recorder{}
+	var calls atomic.Int32
+	m := NewManager(r)
+	m.Retry = 10 * time.Millisecond
+	m.Detect = func() (Backend, error) {
+		if calls.Add(1) < 3 {
+			return nil, ErrNoBackend // no desktop session yet
+		}
+		return b, nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() { m.Run(ctx); close(done) }()
+
+	// Before a backend exists, remote clips are dropped without panicking.
+	m.HandleMessage(ctx, "p", protocol.Message{Type: protocol.TypeClip, Mime: "text/plain", Data: "early", TS: 1})
+
+	deadline := time.Now().Add(2 * time.Second)
+	for m.cur.Load() == nil && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if m.cur.Load() == nil {
+		t.Fatal("manager never picked up the clipboard")
+	}
+	m.HandleMessage(ctx, "p", protocol.Message{Type: protocol.TypeClip, Mime: "text/plain", Data: "late", TS: 2})
+	if got, _ := b.Read(ctx); got != "late" {
+		t.Fatalf("clipboard = %q", got)
+	}
+	cancel()
+	<-done
 }
