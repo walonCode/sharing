@@ -24,6 +24,7 @@ import (
 	"api/internal/config"
 	"api/internal/control"
 	"api/internal/discovery"
+	"api/internal/folders"
 	"api/internal/protocol"
 	"api/internal/server"
 	"api/internal/service"
@@ -78,6 +79,9 @@ func run() error {
 	}
 	srv := server.New(store)
 	svc := transfer.Mount(srv)
+	if _, err := folders.Mount(srv); err != nil {
+		return err
+	}
 
 	httpSrv := &http.Server{
 		Addr:      ":" + strconv.Itoa(store.Settings().Port),
