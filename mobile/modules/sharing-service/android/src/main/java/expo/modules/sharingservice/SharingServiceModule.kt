@@ -89,6 +89,28 @@ class SharingServiceModule : Module() {
       ) { result -> promise.resolve(result.toString()) }
     }
 
+    // Optional automatic phone-to-laptop clipboard (see ClipWatcher). The service reads the flag at start-up.
+    Function("clipboardAccess") {
+      mapOf(
+        "enabled" to Prefs(ctx).autoClipboard,
+        "overlay" to Settings.canDrawOverlays(ctx),
+        "logs" to ClipWatcher.hasReadLogs(ctx),
+        "logActive" to Status.logActive,
+      )
+    }
+    Function("setAutoClipboard") { enabled: Boolean ->
+      Prefs(ctx).autoClipboard = enabled
+      if (Status.running) {
+        SharingService.stop(ctx)
+        SharingService.start(ctx)
+      }
+    }
+    Function("requestOverlayPermission") {
+      ctx.startActivity(
+        Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+      )
+    }
+
     Function("isBatteryOptimizationIgnored") {
       (ctx.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(ctx.packageName)
     }

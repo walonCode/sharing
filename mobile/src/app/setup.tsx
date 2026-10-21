@@ -2,7 +2,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Device from "expo-device";
 import { router } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { PermissionsAndroid, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { AppState, PermissionsAndroid, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { friendlyError } from "../lib/errors";
 import { parseInvite } from "../lib/invite";
@@ -18,6 +18,9 @@ export default function Setup() {
   const [message, setMessage] = useState<string | null>(null);
   const [notificationsOk, setNotificationsOk] = useState(false);
   const [tileAdded, setTileAdded] = useState(false);
+  // Read fresh on every render; status events from the service and returning to the app both re-render this screen.
+  const [, setTick] = useState(0);
+  const access = SharingService.clipboardAccess();
   const [batteryOk, setBatteryOk] = useState(() => SharingService.isBatteryOptimizationIgnored());
 
   const pairRef = useRef<(raw: string) => void>(() => {});
@@ -39,6 +42,14 @@ export default function Setup() {
       setBusy(false);
     }
   }
+
+  // Permissions are changed outside the app (system settings, adb), so re-read them when we come back.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") setTick((t) => t + 1);
+    });
+    return () => sub.remove();
+  }, []);
 
   // Google's code scanner (its own UI with a viewfinder) reports results here.
   useEffect(() => {
@@ -144,6 +155,44 @@ export default function Setup() {
         />
       </Step>
 
+      <View style={styles.step}>
+        <Text style={styles.stepTitle}>Automatic copy from phone (optional, advanced)</Text>
+        <Text style={styles.hint}>
+          Skips the tap. It needs two extra permissions and works around an Android privacy rule, so it is off by default. It may
+          show Android&apos;s &quot;pasted from clipboard&quot; notice and can stop working after a system update.
+        </Text>
+        <Text style={styles.hint}>{access.overlay ? "✓" : "✗"} Display over other apps</Text>
+        {!access.overlay ? <Button label="Allow display over other apps" onPress={() => SharingService.requestOverlayPermission()} /> : null}
+        <Text style={styles.hint}>{access.logs ? "✓" : "✗"} Log access (granted from your computer)</Text>
+        {!access.logs ? (
+          <Text selectable style={styles.code}>
+            adb shell pm grant com.walon.sharing android.permission.READ_LOGS
+          </Text>
+        ) : null}
+        {access.enabled && access.logActive === false ? (
+          <>
+            <Text style={styles.error}>
+              Android hasn&apos;t allowed log access in this session, so copies aren&apos;t being noticed. Tap below and choose “Allow one-time
+              access” when Android asks.
+            </Text>
+            <Button label="Ask for log access again" onPress={() => SharingService.setAutoClipboard(true)} />
+          </>
+        ) : access.enabled && access.logActive ? (
+          <Text style={styles.hint}>✓ Watching for copies</Text>
+        ) : null}
+        <View style={styles.row}>
+          <Text style={styles.stepTitle}>Copy automatically</Text>
+          <Switch
+            value={access.enabled}
+            disabled={!(access.overlay && access.logs)}
+            onValueChange={(on) => {
+              SharingService.setAutoClipboard(on);
+              setTick((t) => t + 1);
+            }}
+          />
+        </View>
+      </View>
+
       <Button
         label="Finish and start"
         disabled={!ready}
@@ -192,6 +241,8 @@ function Button({ label, onPress, disabled }: { label: string; onPress: () => vo
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   container: { padding: 24, gap: 16 },
+  row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  code: { fontFamily: "monospace", backgroundColor: "#f2f2f2", padding: 10, borderRadius: 8 },
   intro: { fontSize: 16, color: "#444" },
   step: { gap: 8, padding: 16, borderRadius: 12, borderWidth: 1, borderColor: "#ddd" },
   disabled: { opacity: 0.4 },

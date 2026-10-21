@@ -1,5 +1,16 @@
 import { NativeModule, requireNativeModule } from "expo";
 
+export type ClipboardAccess = {
+  /** The user turned automatic phone-to-laptop clipboard on. */
+  enabled: boolean;
+  /** "Display over other apps" is allowed. */
+  overlay: boolean;
+  /** READ_LOGS was granted over adb. */
+  logs: boolean;
+  /** Android is letting the service read the log right now (null = still checking). When false, open the app to be asked. */
+  logActive: boolean | null;
+};
+
 export type SharingStatus = {
   paired: boolean;
   laptopName: string | null;
@@ -22,6 +33,10 @@ declare class SharingServiceModule extends NativeModule<Events> {
   stop(): void;
   /** Prompts to add the "Send clipboard" quick-settings tile; resolves "unsupported" before Android 13. */
   requestAddClipboardTile(): Promise<string>;
+  clipboardAccess(): ClipboardAccess;
+  /** Restarts the service so the change applies. */
+  setAutoClipboard(enabled: boolean): void;
+  requestOverlayPermission(): void;
   isBatteryOptimizationIgnored(): boolean;
   requestIgnoreBatteryOptimization(): void;
 }

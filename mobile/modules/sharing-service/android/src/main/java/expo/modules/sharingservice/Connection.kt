@@ -43,6 +43,7 @@ class Connection(private val ctx: Context, private val notifier: Notifier) {
   @Volatile private var lastClip = ""
   @Volatile private var lastClipTs = 0L
   private var thread: Thread? = null
+  private var watcher: ClipWatcher? = null
 
   private val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
   private val netCallback = object : ConnectivityManager.NetworkCallback() {
@@ -51,12 +52,14 @@ class Connection(private val ctx: Context, private val notifier: Notifier) {
 
   fun start() {
     stopped = false
+    if (prefs.autoClipboard) watcher = ClipWatcher(ctx) { sendClip(it) }.also { it.start() }
     cm.registerDefaultNetworkCallback(netCallback)
     thread = Thread(::loop, "sharing-connection").also { it.isDaemon = true; it.start() }
   }
 
   fun stop() {
     stopped = true
+    watcher?.stop()
     try { cm.unregisterNetworkCallback(netCallback) } catch (_: Exception) {}
     ws?.cancel()
     poke()

@@ -1,9 +1,21 @@
 import { Redirect, router } from "expo-router";
+import { useEffect, useRef } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { SharingService, useSharingStatus } from "../lib/sharing";
 
 export default function Home() {
   const status = useSharingStatus();
+
+  // Android only asks for log access while this app is on screen. If automatic clipboard is on but the service has no
+  // access (it restarted in the background), restart it once per visit so the prompt appears.
+  const asked = useRef(false);
+  useEffect(() => {
+    const access = SharingService.clipboardAccess();
+    if (status.paired && access.enabled && access.overlay && access.logs && access.logActive === false && !asked.current) {
+      asked.current = true;
+      SharingService.setAutoClipboard(true);
+    }
+  }, [status]);
 
   if (!status.paired) return <Redirect href="/setup" />;
 
@@ -27,6 +39,7 @@ export default function Home() {
         onPress={() => (status.running ? SharingService.stop() : SharingService.start())}
       />
       <Button label="Send a folder to laptop" onPress={() => SharingService.pickFolderToSend()} />
+      <Button label="Permissions and clipboard options" onPress={() => router.push("/setup")} />
       <Button
         label="Unpair"
         danger
