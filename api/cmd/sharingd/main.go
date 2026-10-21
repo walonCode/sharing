@@ -1,0 +1,129 @@
+// Command sharingd is the laptop-side sharing daemon and its CLI.
+package main
+
+import (
+	"context"
+	"crypto/tls"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"strconv"
+	"syscall"
+	"time"
+
+	"api/internal/config"
+	"api/internal/control"
+	"api/internal/server"
+)
+
+func main() {
+	cmd := "run"
+	if len(os.Args) > 1 {
+		cmd = os.Args[1]
+	}
+	var err error
+	switch cmd {
+	case "run":
+		err = run()
+	case "pair":
+		err = pair()
+	case "peers":
+		err = peers()
+	default:
+		err = fmt.Errorf("unknown command %q (run, pair, peers)", cmd)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "sharingd:", err)
+		os.Exit(1)
+	}
+}
+
+func run() error {
+	dir, err := config.DefaultDir()
+	if err != nil {
+		return err
+	}
+	if d := os.Getenv("SHARING_CONFIG_DIR"); d != "" {
+		dir = d
+	}
+	store, err := config.Open(dir)
+	if err != nil {
+		return err
+	}
+	cert, err := store.Certificate()
+	if err != nil {
+		return err
+	}
+	srv := server.New(store)
+
+	httpSrv := &http.Server{
+		Addr:      ":" + strconv.Itoa(store.Settings().Port),
+		Handler:   srv.Handler(),
+		TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13},
+	}
+	sock, err := control.Listen(control.SocketPath())
+	if err != nil {
+		return err
+	}
+	ctrl := &http.Server{Handler: control.Handler(srv, config.Fingerprint(cert))}
+
+	errc := make(chan error, 2)
+	go func() { errc <- httpSrv.ListenAndServeTLS("", "") }()
+	go func() { errc <- ctrl.Serve(sock) }()
+	log.Printf("sharingd listening on %s as %q", httpSrv.Addr, store.Settings().Name)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	select {
+	case <-ctx.Done():
+	case err := <-errc:
+		return err
+	}
+	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = httpSrv.Shutdown(sctx)
+	_ = ctrl.Shutdown(sctx)
+	_ = os.Remove(control.SocketPath())
+	return nil
+}
+
+func pair() error {
+	resp, err := control.Client(control.SocketPath()).Post("http://sharingd/invite", "application/json", nil)
+	if err != nil {
+		return fmt.Errorf("is the daemon running? %w", err)
+	}
+	defer resp.Body.Close()
+	var out control.InviteResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return err
+	}
+	fmt.Println("Open the app on your phone and enter this pairing link (valid 5 minutes):")
+	fmt.Println(out.URL)
+	return nil
+}
+
+func peers() error {
+	resp, err := control.Client(control.SocketPath()).Get("http://sharingd/peers")
+	if err != nil {
+		return fmt.Errorf("is the daemon running? %w", err)
+	}
+	defer resp.Body.Close()
+	var list []struct {
+		ID, Name string
+		Online   bool
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		return err
+	}
+	for _, p := range list {
+		state := "offline"
+		if p.Online {
+			state = "online"
+		}
+		fmt.Printf("%s\t%s\t%s\n", p.ID, p.Name, state)
+	}
+	return nil
+}
