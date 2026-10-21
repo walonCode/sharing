@@ -17,7 +17,7 @@ Depends on plan 1 (pairing, websocket hub, transfer API).
 
 ## Step 6: Android background service
 
-1. Expo config plugin + Kotlin module `SharingService`: a foreground service (persistent notification, `FOREGROUND_SERVICE_DATA_SYNC`), started on boot via `BOOT_COMPLETED` receiver and restarted if killed.
+1. Local Expo module `mobile/modules/sharing-service` (Kotlin; its own `AndroidManifest.xml` merges permissions, service, boot receiver, share target and tile into the app, so no config plugin is needed): a foreground service (persistent notification, `FOREGROUND_SERVICE_DATA_SYNC`), started on boot via `BOOT_COMPLETED` receiver and restarted if killed.
 2. Inside the service: NsdManager browse for `_sharing._tcp`, OkHttp with pinned fingerprint, websocket with reconnect and backoff, upload/download of files and folders (tar) into the chosen folder via Storage Access Framework tree URI.
 3. Clipboard: Android 10+ blocks background clipboard reads. Approach: a tiny invisible-activity trigger / share-sheet target ("Send to laptop") plus an accessibility-free best effort listener while the foreground service holds focus-less access; incoming clips are always written. Document the limitation.
 4. Share sheet entry (`ACTION_SEND`, `ACTION_SEND_MULTIPLE`) so sharing works without opening the app.
@@ -33,3 +33,10 @@ Lint + typecheck clean for `mobile/`, Go tests pass, end-to-end manual test on a
 ## Branches/PRs (kept after merge)
 
 `feat/clipboard`, `feat/packaging`, `feat/android-service`, `feat/android-setup-ui`.
+
+## Implementation notes
+
+- The service uses `foregroundServiceType="connectedDevice"`, not `dataSync`: Android 15 forbids starting dataSync foreground services from `BOOT_COMPLETED`.
+- Android 10+ blocks background clipboard reads. Phone to laptop clipboard is therefore explicit: the "Send clipboard" quick-settings tile, or sharing text to "Send to laptop". Laptop to phone clipboard is applied automatically (writes are allowed in the background).
+- Connection order: last known address, then mDNS. Reconnects with 1s to 30s backoff and immediately on network changes.
+- Status: Kotlin compiles against SDK 58 and the merged manifest builds; not yet exercised on a physical device.

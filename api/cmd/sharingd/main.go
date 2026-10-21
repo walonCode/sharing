@@ -82,7 +82,7 @@ func run() error {
 	httpSrv := &http.Server{
 		Addr:      ":" + strconv.Itoa(store.Settings().Port),
 		Handler:   srv.Handler(),
-		TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13},
+		TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12},
 	}
 	sock, err := control.Listen(control.SocketPath())
 	if err != nil {
