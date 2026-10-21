@@ -22,7 +22,7 @@ go test ./internal/transfer -run TestFolderRoundTrip    # a single test
 go run ./cmd/sharingd run                                # SHARING_CONFIG_DIR=/tmp/x keeps your real config untouched
 ```
 
-Layout: `internal/{config,pairing,protocol,server,discovery,transfer,folders,clipboard,control,service}` and `cmd/sharingd`. Tests sit next to the code and use temporary directories; please keep it that way (no tests that touch `~/.config` or the real clipboard without restoring it).
+Layout: `internal/{config,pairing,protocol,server,discovery,transfer,clipboard,control,service}` and `cmd/sharingd`. Tests sit next to the code and use temporary directories; please keep it that way (no tests that touch `~/.config` or the real clipboard without restoring it).
 
 ### Phone app (`mobile/`)
 

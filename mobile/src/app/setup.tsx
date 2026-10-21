@@ -1,15 +1,14 @@
 import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Device from "expo-device";
-import { router, useFocusEffect } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { router } from "expo-router";
+import { useEffect, useRef, useState } from "react";
 import { PermissionsAndroid, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { friendlyError } from "../lib/errors";
 import { parseInvite } from "../lib/invite";
-import { getReceiveFolder } from "../lib/laptop";
 import { SharingService, useSharingStatus } from "../lib/sharing";
 
-/** One-time setup: pair, choose the receive folder, allow background running. */
+/** One-time setup: pair, then allow background running. */
 export default function Setup() {
   const status = useSharingStatus();
   const [cameraPermission, requestCamera] = useCameraPermissions();
@@ -74,16 +73,7 @@ export default function Setup() {
     setScanning(true);
   }
 
-  // Refresh when returning from the laptop folder browser.
-  const [laptopFolder, setLaptopFolder] = useState<string | null>(null);
-  useFocusEffect(
-    useCallback(() => {
-      if (!status.paired) return;
-      getReceiveFolder().then(setLaptopFolder, () => setLaptopFolder(null));
-    }, [status.paired]),
-  );
-
-  const ready = status.paired && !!status.folder && laptopFolder !== null;
+  const ready = status.paired;
 
   if (scanning) {
     return (
@@ -107,7 +97,7 @@ export default function Setup() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.intro}>
-        Set up once. Afterwards sharing and clipboard sync run in the background without opening this app.
+        Set up once. Afterwards sharing and clipboard sync run in the background without opening this app. Received files are filed in a folder named after the sender: your laptop's name inside Downloads on this phone, and this phone's name on your laptop.
       </Text>
 
       {busy ? <Text style={styles.hint}>Pairing…</Text> : null}
@@ -127,17 +117,7 @@ export default function Setup() {
         <Button label={busy ? "Pairing…" : "Pair with link"} onPress={() => pair(link)} disabled={busy || !link} />
       </Step>
 
-      <Step n={2} title="Choose where received files go" done={!!status.folder} doneText={`On this phone: ${status.folder}`} disabled={!status.paired}>
-        <Text style={styles.hint}>Files sent from the laptop are saved here on the phone.</Text>
-        <Button label="Choose phone folder" onPress={() => SharingService.pickReceiveFolder()} />
-      </Step>
-
-      <Step n={3} title="Choose the laptop's folder" done={laptopFolder !== null} doneText={`On the laptop: ${laptopFolder}`} disabled={!status.paired}>
-        <Text style={styles.hint}>Files sent from the phone are saved here on the laptop. You browse the laptop from here.</Text>
-        <Button label="Browse laptop folders" onPress={() => router.push("/laptop-folder")} />
-      </Step>
-
-      <Step n={4} title="Allow background running" done={notificationsOk && batteryOk} doneText="Allowed" disabled={!status.paired}>
+      <Step n={2} title="Allow background running" done={notificationsOk && batteryOk} doneText="Allowed" disabled={!status.paired}>
         <Button label="Allow notifications" onPress={allowNotifications} />
         <Button
           label="Don't optimise battery"

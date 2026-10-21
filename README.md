@@ -4,7 +4,7 @@ AirDrop-style sharing between a Linux laptop and an Android phone over your loca
 
 - **Files, folders, images, videos** both ways.
 - **Clipboard sync**: copy text on the laptop and it is on the phone's clipboard automatically.
-- **Set up once, then forget it.** You open the phone app a single time to pair and choose folders. After that both sides run in the background, start on boot, and reconnect by themselves, even when the laptop's IP address changes.
+- **Set up once, then forget it.** You open the phone app a single time to pair. After that both sides run in the background, start on boot, and reconnect by themselves, even when the laptop's IP address changes.
 
 ## How you use it
 
@@ -53,7 +53,7 @@ bun install
 bunx expo run:android      # phone connected over USB with debugging on
 ```
 
-Open the app and follow the four setup steps: scan the QR, choose the phone's receive folder, choose the laptop's receive folder (you browse the laptop's folders from the phone), and allow notifications and background running. Then tap **Finish and start**.
+Open the app and follow the two setup steps: scan the QR, then allow notifications and background running. Tap **Finish and start**.
 
 ## Laptop commands
 

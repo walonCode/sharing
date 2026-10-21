@@ -5,7 +5,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"api/internal/protocol"
 	"api/internal/server"
@@ -31,7 +33,9 @@ func (s *Service) handleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "name required", http.StatusBadRequest)
 		return
 	}
-	dest := s.Srv.Store.Settings().ReceiveDir
+	// Each phone gets its own folder named after it: <receive dir>/<phone name>.
+	peer := server.PeerFrom(r.Context())
+	dest := filepath.Join(s.Srv.Store.Settings().ReceiveDir, PeerFolder(peer.Name))
 	var (
 		got string
 		err error
@@ -97,4 +101,13 @@ func (s *Service) Send(peerID, path string) (Offer, error) {
 		return Offer{}, ErrPeerOffline
 	}
 	return o, nil
+}
+
+// PeerFolder is the sub-folder used for files received from a phone.
+func PeerFolder(name string) string {
+	n := SanitizeName(strings.TrimSpace(name))
+	if n == "file" || strings.HasPrefix(n, ".") {
+		return "phone"
+	}
+	return n
 }

@@ -6,6 +6,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
@@ -140,12 +141,13 @@ class Connection(private val ctx: Context, private val notifier: Notifier) {
   private fun download(id: String, kind: String, name: String) {
     val b = base ?: return
     try {
-      val root = Storage.root(ctx, prefs)
+      if (Build.VERSION.SDK_INT < 29) error("Android 10 or newer is required to receive files")
+      val laptop = prefs.laptopName ?: "laptop"
       val req = Request.Builder().url("$b/transfer/$id").header("Authorization", "Bearer ${prefs.peerToken}").build()
       client!!.newCall(req).execute().use { resp ->
         if (!resp.isSuccessful) error("Laptop refused the transfer (${resp.code})")
         val body = resp.body!!.byteStream()
-        val saved = if (kind == "dir") Storage.untar(root, name, body, ctx) else Storage.saveFile(root, name, body, ctx)
+        val saved = if (kind == "dir") Storage.untar(ctx, laptop, name, body) else Storage.saveFile(ctx, laptop, name, body)
         notifier.transfer("Received", saved)
       }
     } catch (e: Exception) {

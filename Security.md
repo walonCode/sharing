@@ -12,7 +12,7 @@ Sharing is meant for a laptop and a phone you own, on a network you trust. There
 
 ## What a paired phone can do
 
-A paired phone is trusted. It can send files and clipboard text to the laptop, receive what you send, read nothing from the laptop except what the laptop offers it, and **browse the names of folders inside your home directory and choose or create the receive folder** (hidden folders and symlinks that leave the home directory are not shown; paths outside home are refused). It cannot read file contents or list files.
+A paired phone is trusted. It can send files and clipboard text to the laptop and receive what you send. Uploads are always written into a sub-folder of the laptop's receive folder named after the phone, and the phone cannot choose another location, read file contents, or list files on the laptop.
 
 ## Hardening already in place
 

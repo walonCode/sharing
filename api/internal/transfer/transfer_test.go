@@ -230,7 +230,7 @@ func setup(t *testing.T) *env {
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
-	body, _ := json.Marshal(protocol.PairRequest{Token: srv.Pairing.NewInvite(time.Minute), DeviceID: "phone", Name: "p"})
+	body, _ := json.Marshal(protocol.PairRequest{Token: srv.Pairing.NewInvite(time.Minute), DeviceID: "phone", Name: "My Phone"})
 	resp, err := http.Post(ts.URL+"/pair", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -264,7 +264,7 @@ func TestUploadFileAndFolderRequireAuth(t *testing.T) {
 	if resp := e.do(t, "PUT", "/upload?name=a.txt", strings.NewReader("hi")); resp.StatusCode != http.StatusCreated {
 		t.Fatalf("file upload = %d", resp.StatusCode)
 	}
-	if read(t, filepath.Join(e.recv, "a.txt")) != "hi" {
+	if read(t, filepath.Join(e.recv, "My Phone", "a.txt")) != "hi" {
 		t.Fatal("file content wrong")
 	}
 
@@ -275,7 +275,7 @@ func TestUploadFileAndFolderRequireAuth(t *testing.T) {
 	if resp := e.do(t, "PUT", "/upload?name=album&kind=dir", &buf); resp.StatusCode != http.StatusCreated {
 		t.Fatalf("dir upload = %d", resp.StatusCode)
 	}
-	if read(t, filepath.Join(e.recv, "album/x/y.txt")) != "Y" {
+	if read(t, filepath.Join(e.recv, "My Phone", "album/x/y.txt")) != "Y" {
 		t.Fatal("folder content wrong")
 	}
 
@@ -333,5 +333,23 @@ func TestSendOfferAndDownload(t *testing.T) {
 	got, err := Unpack(resp.Body, t.TempDir(), "x")
 	if err != nil || read(t, filepath.Join(got, "r.md")) != "R" {
 		t.Fatalf("folder download: %v", err)
+	}
+}
+
+func TestPeerFolderNames(t *testing.T) {
+	cases := map[string]string{
+		"Walon":       "Walon",
+		"  Pixel 8  ": "Pixel 8",
+		"":            "phone",
+		"..":          "phone",
+		".hidden":     "phone",
+		"../../etc":   "etc",
+		`a\b`:         "b",
+		"My/Phone":    "Phone",
+	}
+	for in, want := range cases {
+		if got := PeerFolder(in); got != want {
+			t.Errorf("PeerFolder(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
