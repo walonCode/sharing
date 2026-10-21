@@ -10,6 +10,9 @@ JAVA_HOME ?= $(HOME)/.local/share/mise/installs/java/temurin-21
 ANDROID_HOME ?= $(HOME)/Android/Sdk
 export JAVA_HOME ANDROID_HOME
 
+# CPU architectures in the APK. arm64-v8a covers every modern phone and cuts the size sharply.
+ABIS ?= arm64-v8a
+
 GO_LDFLAGS := -s -w
 
 .DEFAULT_GOAL := help
@@ -55,13 +58,13 @@ logs: ## Follow the daemon's logs
 
 apk: ## Build the minified release APK into dist/sharing.apk
 	cd mobile && bun install --frozen-lockfile && bunx expo prebuild --platform android --clean --no-install
-	cd mobile/android && ./gradlew assembleRelease
+	cd mobile/android && ./gradlew assembleRelease -PreactNativeArchitectures=$(ABIS)
 	@mkdir -p $(DIST)
 	cp mobile/android/app/build/outputs/apk/release/app-release.apk $(APK)
 	@ls -lh $(APK)
 
 apk-quick: ## Rebuild the APK reusing mobile/android (fast; use after JS-only changes)
-	cd mobile/android && ./gradlew assembleRelease
+	cd mobile/android && ./gradlew assembleRelease -PreactNativeArchitectures=$(ABIS)
 	@mkdir -p $(DIST)
 	cp mobile/android/app/build/outputs/apk/release/app-release.apk $(APK)
 	@ls -lh $(APK)
