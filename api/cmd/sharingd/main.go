@@ -103,13 +103,9 @@ func run() error {
 	go func() {
 		errc <- discovery.Advertise(ctx, discovery.Info{ID: set.DeviceID, Name: set.Name, Fingerprint: config.Fingerprint(cert), Port: set.Port})
 	}()
-	if cb, err := clipboard.Detect(); err != nil {
-		log.Printf("clipboard sync disabled: %v", err)
-	} else {
-		sync := clipboard.NewSyncer(cb, srv.Hub)
-		srv.OnMessage = func(peerID string, m protocol.Message) { sync.HandleMessage(ctx, peerID, m) }
-		go sync.Run(ctx)
-	}
+	clip := clipboard.NewManager(srv.Hub)
+	srv.OnMessage = func(peerID string, m protocol.Message) { clip.HandleMessage(ctx, peerID, m) }
+	go clip.Run(ctx)
 	log.Printf("sharingd listening on %s as %q", httpSrv.Addr, store.Settings().Name)
 
 	select {
@@ -245,7 +241,11 @@ func install() error {
 		return err
 	}
 	fmt.Println("installed and started", path)
-	fmt.Println("To keep it running when you are logged out: loginctl enable-linger $USER")
+	if err := service.EnableLinger(); err != nil {
+		fmt.Println("could not keep it running while logged out; run: loginctl enable-linger", err)
+	} else {
+		fmt.Println("it will start at boot and keep running after you log out")
+	}
 	fmt.Println("Next: sharingd setup --dir ~/Downloads/Sharing")
 	return nil
 }

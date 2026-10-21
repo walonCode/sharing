@@ -17,6 +17,8 @@ func UnitFile(exe string) string {
 Description=Sharing daemon (file and clipboard sync with your phone)
 After=network-online.target
 Wants=network-online.target
+# Never give up restarting, however often it crashes.
+StartLimitIntervalSec=0
 
 [Service]
 ExecStart=%q run
@@ -62,6 +64,15 @@ func Install() (string, error) {
 		}
 	}
 	return path, nil
+}
+
+// EnableLinger lets the user's services start at boot and survive logout.
+func EnableLinger() error {
+	out, err := exec.Command("loginctl", "enable-linger").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("loginctl enable-linger: %w: %s", err, out)
+	}
+	return nil
 }
 
 // Uninstall stops and removes the unit.

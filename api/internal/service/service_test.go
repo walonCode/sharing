@@ -10,6 +10,7 @@ func TestUnitFile(t *testing.T) {
 	for _, want := range []string{
 		`ExecStart="/opt/my dir/sharingd" run`,
 		"Restart=always",
+		"StartLimitIntervalSec=0",
 		"WantedBy=default.target",
 	} {
 		if !strings.Contains(u, want) {

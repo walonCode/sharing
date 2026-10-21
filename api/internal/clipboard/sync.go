@@ -3,6 +3,7 @@ package clipboard
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"api/internal/protocol"
@@ -89,4 +90,45 @@ func (s *Syncer) HandleMessage(ctx context.Context, peerID string, m protocol.Me
 	s.mu.Unlock()
 
 	_ = s.Backend.Write(ctx, m.Data)
+}
+
+// Manager keeps clipboard sync alive across desktop sessions: when the daemon
+// starts before login (or no clipboard tool is usable yet) it keeps retrying
+// until a backend appears, so no restart is ever needed.
+type Manager struct {
+	Out    Broadcaster
+	Detect func() (Backend, error)
+	Retry  time.Duration
+
+	cur atomic.Pointer[Syncer]
+}
+
+func NewManager(out Broadcaster) *Manager {
+	return &Manager{Out: out, Detect: Detect, Retry: 15 * time.Second}
+}
+
+// Run blocks until ctx ends.
+func (m *Manager) Run(ctx context.Context) {
+	for ctx.Err() == nil {
+		b, err := m.Detect()
+		if err != nil {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(m.Retry):
+			}
+			continue
+		}
+		s := NewSyncer(b, m.Out)
+		m.cur.Store(s)
+		s.Run(ctx)
+	}
+}
+
+// HandleMessage forwards to the active syncer; clips arriving before a
+// clipboard exists are dropped.
+func (m *Manager) HandleMessage(ctx context.Context, peerID string, msg protocol.Message) {
+	if s := m.cur.Load(); s != nil {
+		s.HandleMessage(ctx, peerID, msg)
+	}
 }
