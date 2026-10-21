@@ -123,3 +123,13 @@ func (h *Hub) Broadcast(m protocol.Message) int {
 	}
 	return n
 }
+
+// Disconnect closes the peer's websocket, if any.
+func (h *Hub) Disconnect(peerID string) {
+	h.mu.RLock()
+	c := h.conns[peerID]
+	h.mu.RUnlock()
+	if c != nil {
+		c.cancel()
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -48,12 +49,14 @@ func main() {
 		err = install()
 	case "uninstall":
 		err = service.Uninstall()
+	case "unpair":
+		err = unpair(os.Args[2:])
 	case "send":
 		err = send(os.Args[2:])
 	case "peers":
 		err = peers()
 	default:
-		err = fmt.Errorf("unknown command %q (run, pair, peers, send, setup, install, uninstall)", cmd)
+		err = fmt.Errorf("unknown command %q (run, pair, peers, unpair, send, setup, install, uninstall)", cmd)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "sharingd:", err)
@@ -247,5 +250,24 @@ func install() error {
 		fmt.Println("it will start at boot and keep running after you log out")
 	}
 	fmt.Println("Next: sharingd setup --dir ~/Downloads/Sharing")
+	return nil
+}
+
+// unpair revokes a phone: its token stops working and its connection is closed.
+func unpair(args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: sharingd unpair <id or name>")
+	}
+	req, _ := http.NewRequest(http.MethodDelete, "http://sharingd/peers/"+url.PathEscape(args[0]), nil)
+	resp, err := control.Client(control.SocketPath()).Do(req)
+	if err != nil {
+		return fmt.Errorf("is the daemon running? %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		msg, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("%s", strings.TrimSpace(string(msg)))
+	}
+	fmt.Println("unpaired", args[0])
 	return nil
 }

@@ -119,6 +119,19 @@ func Handler(srv *server.Server, svc *transfer.Service, fp string) http.Handler 
 		}
 		writeJSON(w, srv.Store.Settings())
 	})
+	mux.HandleFunc("DELETE /peers/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := resolvePeer(srv, r.PathValue("id"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		if err := srv.Store.RemovePeer(id); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		srv.Hub.Disconnect(id)
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.HandleFunc("GET /peers", func(w http.ResponseWriter, r *http.Request) {
 		type peer struct {
 			ID     string `json:"id"`
