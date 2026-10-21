@@ -43,6 +43,11 @@ class Prefs(ctx: Context) {
     get() = sp.getBoolean("enabled", false)
     set(v) = sp.edit().putBoolean("enabled", v).apply()
 
+  /** Opt-in automatic phone-to-laptop clipboard (see ClipWatcher). */
+  var autoClipboard: Boolean
+    get() = sp.getBoolean("autoClipboard", false)
+    set(v) = sp.edit().putBoolean("autoClipboard", v).apply()
+
   val paired: Boolean get() = peerToken != null && fingerprint != null && laptopId != null
 
   fun clearPairing() {

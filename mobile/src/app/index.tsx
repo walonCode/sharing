@@ -27,6 +27,7 @@ export default function Home() {
         onPress={() => (status.running ? SharingService.stop() : SharingService.start())}
       />
       <Button label="Send a folder to laptop" onPress={() => SharingService.pickFolderToSend()} />
+      <Button label="Permissions and clipboard options" onPress={() => router.push("/setup")} />
       <Button
         label="Unpair"
         danger
