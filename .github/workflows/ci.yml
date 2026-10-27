@@ -1,0 +1,67 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: api/go.mod
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: go test -race -cover ./...
+      - name: Fuzz (fixed budget)
+        run: |
+          for t in $(grep -rhoE '^func (Fuzz[A-Za-z0-9_]+)' --include='*_test.go' . | awk '{print $2}' | sort -u); do
+            pkg=$(grep -rlE "^func $t\b" --include='*_test.go' . | head -1 | xargs dirname)
+            go test "$pkg" -run '^$' -fuzz "^$t\$" -fuzztime 15s
+          done
+      - run: go install honnef.co/go/tools/cmd/staticcheck@latest && staticcheck ./...
+      - run: go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck ./...
+      - run: go install github.com/securego/gosec/v2/cmd/gosec@latest && gosec -quiet -exclude-generated ./...
+
+  mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bunx tsc --noEmit
+      - run: bun run lint
+      - run: bun test src
+      - run: bun audit
+        continue-on-error: true
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@v3
+      - name: Compile and unit-test the Kotlin module
+        working-directory: mobile
+        run: |
+          bun install --frozen-lockfile
+          bunx expo prebuild --platform android --no-install
+          cd android && ./gradlew :sharing-service:compileDebugKotlin :sharing-service:testDebugUnitTest
+      - name: Manifest assertions
+        run: scripts/check-manifest.sh

@@ -1,9 +1,0 @@
-expo.modules.sharingservice.sharing-service-pngs-0 /home/walon/Code/sharing/mobile/modules/sharing-service/android/build/generated/res/pngs/release
-expo.modules.sharingservice.sharing-service-updated_navigation_xml-1 /home/walon/Code/sharing/mobile/modules/sharing-service/android/build/generated/updated_navigation_xml/release
-expo.modules.sharingservice.sharing-service-mergeReleaseResources-2 /home/walon/Code/sharing/mobile/modules/sharing-service/android/build/intermediates/incremental/release/mergeReleaseResources/merged.dir
-expo.modules.sharingservice.sharing-service-mergeReleaseResources-3 /home/walon/Code/sharing/mobile/modules/sharing-service/android/build/intermediates/incremental/release/mergeReleaseResources/stripped.dir
-expo.modules.sharingservice.sharing-service-release-4 /home/walon/Code/sharing/mobile/modules/sharing-service/android/build/intermediates/merged_res/release/mergeReleaseResources
-expo.modules.sharingservice.sharing-service-release-5 /home/walon/Code/sharing/mobile/modules/sharing-service/android/build/intermediates/packaged_res/release/packageReleaseResources
-expo.modules.sharingservice.sharing-service-main-6 /home/walon/Code/sharing/mobile/modules/sharing-service/android/src/main/res
-expo.modules.sharingservice.sharing-service-release-7 /home/walon/Code/sharing/mobile/modules/sharing-service/android/src/release/res
-gradleHome-0 /home/walon/.gradle
