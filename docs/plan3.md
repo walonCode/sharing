@@ -176,3 +176,40 @@ Branch `docs/security-and-resume`.
 3. **Pairing confirmation on the laptop** on by default (recommended, `--yes` to skip) versus opt-in.
 4. **Spool size for share-sheet files** (256 MiB suggested): larger means more phone storage used while queued, smaller means more "needs re-share" failures after a restart.
 5. **Kotlin unit-test tooling** (JUnit source set in the module): recommended, since retry and queue logic is the part most likely to regress and cannot be covered from the TypeScript side.
+
+
+## Implementation notes
+
+Written after the work was done. What changed, what was measured, and what was not possible.
+
+### Done
+
+- **Step 8 (baseline and audit).** `.github/workflows/ci.yml` runs gofmt, vet, `go test -race -cover`, golangci-lint, staticcheck, govulncheck, gosec, the fuzz targets for a fixed budget, the mobile checks (tsc, lint, prettier, `bun test`, `bun audit`) and an Android job (ktlint, Kotlin compile, JVM unit tests including the daemon interop test, Android lint, merged-manifest assertions for the default and the opt-in build). 350 tracked Gradle outputs were removed from git and the folder is ignored. The threat model and the decision per finding S1 to S16 are in `Security.md`.
+- **Step 9 (daemon hardening).** All items, with the settings keys and defaults listed. The first design added a `ConnState` hook for the TLS handshake, on the assumption that `ReadHeaderTimeout` does not cover it; a probe showed that net/http already applies the smallest of `ReadHeaderTimeout`, `ReadTimeout` and `WriteTimeout` to the handshake, so the hook was removed. Tests connect and stay silent, stall the headers, stall a body, and hold a keep-alive connection past the timeout. Pairing confirmation is on by default.
+- **Step 10 (retry foundation).** `internal/retry` (Go) and `Retry.kt` implement the same table; both have the classifier, backoff bounds, attempt reset on progress, give-up and Retry-After tests. One addition to the table: an unreachable laptop (no connection made) does not spend attempts, because eight attempts would give up after four minutes while the laptop is merely off. `Hub.Send` reports `ErrOffline` or `ErrBusy`. The stall watchdog and the persistent queue are in the Kotlin module (`StallGuard`, `SqliteTransferStore`, `Transfers`); the queue survives a simulated process death in `TransfersTest`.
+- **Step 11 (resumable upload).** The protocol in the plan, with 423 for a concurrent writer after a 2 s wait (a client that retries right after a dropped connection otherwise races the handler still noticing it), 409 with the stored offset, 10-minute result retention, folder sessions published by one rename, and the v1 `PUT` kept. The Kotlin client resumes from the laptop's offset and falls back to the v1 `PUT` when `/uploads` answers 404/405/501. Small share-sheet files are spooled (`Spool`); larger ones are retried only while the grant lasts.
+- **Step 12 (resumable download).** Persisted offers with states, `ETag` and frozen size and mtime, `http.ServeContent` ranges and `If-Range`, 412 on change, folder manifests with `os.Root` opens, background SHA-256, `ack`/`progress`/`cancel` messages. An HTTP `POST /transfer/{id}/ack` was added because a websocket that is down at the end of a download would otherwise lose the result. The phone writes to a pending MediaStore entry with `DATE_EXPIRES`, checks the entry's real length against the stored offset on every attempt, and verifies the checksum when the laptop has one (one automatic re-download on mismatch).
+- **Step 13 (outbox, progress, CLI).** Offline sends are queued and replayed on connect; `sharingd transfers|cancel|retry`, `send --wait`; progress and Cancel/Retry in the notification, one summary per direction instead of a notification per file; the newest unsent clipboard value is resent after reconnect; a lost `/pair` response can be repeated by the same device for 2 minutes.
+- **Step 14 (Android hardening).** URI policy and 5 s Undo, Keystore-wrapped token with migration, `allowBackup=false`, the opt-in build for `READ_LOGS`/overlay (via `app.config.ts`, decision 2 below), `BootReceiver` not exported, tar caps and control-character checks, fingerprint review on the pairing screen, manifest assertion script.
+- **Step 15 (audit pass 2, docs).** Second pass recorded in `Security.md`; fuzz targets for `safeJoin`, `SanitizeName`, `Unpack`, the manifest parser and the message decoder (each ran clean for 5 to 9 s locally, 15 s per target in CI); README, Contributing and CLAUDE.md updated.
+
+### Decisions taken (the plan's open decisions, recommendation first)
+
+1. Folder format: per-file manifests both ways; tar kept for old peers.
+2. `READ_LOGS` and the overlay permission only in the opt-in build (`make apk-auto-clipboard`).
+3. Pairing confirmation on by default, `--yes` to skip.
+4. Spool threshold 256 MiB, adjustable in `Prefs`.
+5. Kotlin test tooling: JUnit plus MockWebServer in the module, and an interop test that runs a real daemon.
+
+### Verification actually performed
+
+- Go: `go vet`, `go test -race ./...`, golangci-lint (0 issues), gosec with the documented exclusions (0 issues), fuzz targets. `govulncheck` could not reach its database from the sandbox.
+- Kotlin: the module compiled with kotlinc against the Android 14 framework jar (the Expo bridge file excluded), 64 JVM tests passed, including 8 interop tests against the real `sharingd` (resume both ways after a killed source or sink, folder upload and download, vanished session, changed file, ack, stall guard).
+- Mobile: tsc, `expo lint`, prettier, `bun test`, a Metro bundle for Android, `expo prebuild` (the generated manifest has `allowBackup=false`, no log or overlay permission, no storage permissions).
+
+### Not done, and why
+
+- **The device matrix of step 15.5** needs a phone (and the plan says to ask before touching it). Nothing here ran on hardware. Items most likely to need attention: boot receiver with `exported="false"`, Keystore wrapping on the user's Samsung, MediaStore pending entries with `DATE_EXPIRES` and `wa` append, share-sheet spooling, notification actions on Android 14+.
+- **Gradle build of the module and the merged-manifest check** could not run (no Android SDK in the sandbox); CI runs them. `lint-baseline.xml` is empty because Android lint was never run; with `abortOnError true` the first CI run may report existing issues, which should be recorded with `./gradlew :sharing-service:updateLintBaseline`.
+- **Real distinction between the system share sheet and other callers** is not possible on Android; the Undo window applies to every share.
+- **Branches and pull requests.** The plan lists eight branches; this work was committed on the single branch this session was given, in one commit per theme.

@@ -13,7 +13,7 @@ Commit messages should say what changed and why: a short imperative summary line
 
 ## Setup and checks
 
-The `Makefile` wraps the common tasks (`make help`): `make test` runs every check for both projects, `make service` builds and installs the daemon, `make phone` builds the release APK and installs it on a USB-connected phone, and `make phone-quick` is a fast rebuild that reuses the generated `mobile/android` (use `make apk` or `make phone` after changing `app.json`, plugins, or native dependencies). Gradle needs JDK 17-21: pass `JAVA_HOME=/path/to/jdk21`.
+The `Makefile` wraps the common tasks (`make help`): `make test` runs every test for both projects, `make lint` the style checks (golangci-lint, prettier, ktlint), `make bench` the Go benchmarks, `make service` builds and installs the daemon, `make phone` builds the release APK and installs it on a USB-connected phone, and `make phone-quick` is a fast rebuild that reuses the generated `mobile/android` (use `make apk` or `make phone` after changing `app.json`, plugins, or native dependencies). Gradle needs JDK 17-21: pass `JAVA_HOME=/path/to/jdk21`.
 
 ### Laptop daemon (`api/`)
 
@@ -21,10 +21,12 @@ The `Makefile` wraps the common tasks (`make help`): `make test` runs every chec
 cd api
 go vet ./... && go test -race ./...
 go test ./internal/transfer -run TestFolderRoundTrip    # a single test
+go test ./internal/transfer -run '^$' -fuzz FuzzUnpack -fuzztime 30s    # fuzz targets live next to the code
+golangci-lint run ./...                                  # needs a golangci-lint built with a recent Go
 go run ./cmd/sharingd run                                # SHARING_CONFIG_DIR=/tmp/x keeps your real config untouched
 ```
 
-Layout: `internal/{config,pairing,protocol,server,discovery,transfer,clipboard,control,service}` and `cmd/sharingd`. Tests sit next to the code and use temporary directories; please keep it that way (no tests that touch `~/.config` or the real clipboard without restoring it).
+Layout: `internal/{config,pairing,protocol,server,discovery,transfer,clipboard,control,retry,service}` and `cmd/sharingd` (`run.go` the daemon, `cli.go` the subcommands, `doctor.go`, `notify.go`). Tests sit next to the code and use temporary directories; please keep it that way (no tests that touch `~/.config` or the real clipboard without restoring it).
 
 ### Phone app (`mobile/`)
 
@@ -33,16 +35,19 @@ cd mobile
 bun install
 bunx tsc --noEmit
 bunx expo lint
+bun run format:check      # prettier; `bun run format` fixes
 bun test src
 bunx expo-doctor
 ```
 
-To compile the Kotlin module without a device (use JDK 21; newer JDKs break Gradle):
+To compile and test the Kotlin module without a device (use JDK 21; newer JDKs break Gradle):
 
 ```bash
 bunx expo prebuild --platform android --no-install
-cd android && JAVA_HOME=/path/to/jdk21 ./gradlew :sharing-service:compileDebugKotlin
+cd android && JAVA_HOME=/path/to/jdk21 ./gradlew :sharing-service:compileDebugKotlin :sharing-service:testDebugUnitTest
 ```
+
+The unit tests cover the retry policy, queue, vault, URI policy, remote client and downloader on a plain JVM. `InteropTest` additionally drives a real daemon (resume in both directions, folders, ack, stall guard) and runs only when `SHARINGD_BIN` points at a built `sharingd`: `cd api && go build -o /tmp/sharingd ./cmd/sharingd && SHARINGD_BIN=/tmp/sharingd ./gradlew :sharing-service:testDebugUnitTest`. After a Gradle build, `scripts/check-manifest.sh` asserts the merged manifest (no `READ_LOGS`, `allowBackup=false`, exported flags).
 
 Things to know:
 
@@ -50,8 +55,8 @@ Things to know:
 - The background service must work with no JavaScript running, so logic belongs in Kotlin (`mobile/modules/sharing-service`). The module's JS surface stays thin.
 - `mobile/android/` is generated and not committed.
 - Android 10+ restrictions (clipboard reads, foreground-service types) shape the design; see `docs/plan2.md` before changing them. The optional automatic clipboard (`ClipWatcher.kt`) depends on system log wording that differs between AOSP and Samsung; test it on a real device and read the README section before changing it.
-- Kotlin changes cannot be fully verified by compiling. If you touch the service, install it on a phone (`make phone-quick`) and check `sharingd peers`, a transfer each way, and the clipboard. `adb logcat -s SharingClip` shows the clipboard watcher.
-- `docs/plan1.md` and `docs/plan2.md` are the original build plans. The README is the source of truth for how things work today.
+- Kotlin changes cannot be fully verified by compiling or by the JVM tests. If you touch the service, install it on a phone (`make phone-quick`) and check `sharingd peers`, a transfer each way, and the clipboard. `adb logcat -s SharingClip` shows the clipboard watcher.
+- `docs/plan1.md` to `docs/plan4.md` are the build plans (plan 3: resume and security, plan 4: optimisation and cleanup; both end with implementation notes). Plans 1 and 2 are the original build plans. The README is the source of truth for how things work today.
 
 ## Guidelines
 

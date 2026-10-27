@@ -14,7 +14,7 @@ Contents: [Daily use](#daily-use) · [Install](#install) · [Automatic phone →
 | --- | --- |
 | Send phone → laptop | Share from any app and pick **Send to laptop**. |
 | Send a folder phone → laptop | Open the app, tap **Send a folder to laptop**. |
-| Send laptop → phone | In your file manager: right-click → **Scripts → Send to phone** (Nautilus), or **Open With → Send to phone**. Or run `sharingd send photo.jpg Videos/`. A desktop notification confirms. |
+| Send laptop → phone | In your file manager: right-click → **Scripts → Send to phone** (Nautilus), or **Open With → Send to phone**. Or run `sharingd send photo.jpg Videos/`. A desktop notification confirms. If the phone is offline the item is queued and delivered when it reconnects. |
 | Copy laptop → phone | Copy as usual. It appears on the phone's clipboard. |
 | Copy phone → laptop | Copy as usual if you set up the [automatic mode](#automatic-phone--laptop-clipboard-optional). Otherwise copy, then tap **Send clipboard to laptop** in the notification (expand it with the small arrow) or the **Send clipboard** quick-settings tile. |
 
@@ -26,6 +26,8 @@ Contents: [Daily use](#daily-use) · [Install](#install) · [Automatic phone →
 | Phone (from your laptop) | `Downloads/<laptop name>/` |
 
 Change the laptop's base folder with `sharingd setup --dir <path>`. Name collisions never overwrite (`photo (1).jpg`). Empty folders are not recreated on the phone.
+
+**Interrupted transfers continue.** A WiFi drop, a laptop suspend, an app or daemon restart, or a phone reboot does not throw away a half-sent file: uploads resume from the byte the laptop stored, downloads from the byte already on the phone (with a checksum check at the end). The phone retries with a growing delay and skips the wait when the network returns. If the laptop is simply off, queued items wait instead of failing. The notification shows progress with **Cancel**; a failure offers **Retry**. After sharing from another app there are 5 seconds to **Undo**.
 
 ## Install
 
@@ -50,24 +52,27 @@ Without `make`: `cd api && go build -trimpath -ldflags="-s -w" -o ~/.local/bin/s
 ### 3. Phone
 
 ```bash
-make phone      # builds the minified arm64 release APK (about 40 MB) and installs it over adb
+make phone      # builds the minified arm64 release APK and installs it over adb
 ```
 
 The first build takes 10–30 minutes. If your default Java is newer than 21: `make phone JAVA_HOME=/path/to/jdk21`. For a non-arm64 phone: `make phone ABIS=arm64-v8a,armeabi-v7a,x86_64`. The APK is signed with the debug key, which is fine for your own phone. `dist/sharing.apk` is also left on disk if you would rather copy it over yourself. (The app has a native background service, so it needs this build, not Expo Go.)
 
 ### 4. Pair
 
-1. On the laptop run `sharingd setup`. It prints a QR code and a `sharing://pair?…` link (valid for 5 minutes, single use).
-2. On the phone open **Sharing** and tap **Scan QR**. If the camera won't scan (a small terminal QR can be hard to read: zoom the terminal in), paste the whole link into the text box and tap **Pair with link**.
-3. Step 2 in the app: tap **Allow notifications** and **Don't optimise battery**. This lets Android keep the background service alive.
-4. Step 3 (optional): **Add "Send clipboard" tile** adds the one-tap clipboard button to Quick Settings.
-5. Tap **Finish and start**.
+1. On the laptop run `sharingd setup`. It prints a QR code and a `sharing://pair?…` link (valid for 5 minutes, single use) and then waits for the phone.
+2. On the phone open **Sharing** and tap **Scan QR**. If the camera won't scan (a small terminal QR can be hard to read: zoom the terminal in), paste the whole link into the text box and tap **Review link**.
+3. The phone shows the laptop's name and the first digits of its certificate fingerprint. Tap **Pair**, then answer the question on the laptop (`Pixel 8 wants to pair, accept? [y/N]`). `sharingd setup --yes` skips that question.
+4. On the permissions screen tap **Allow notifications** and **Don't optimise battery**. This lets Android keep the background service alive.
+5. Optional: **Add "Send clipboard" tile** adds the one-tap clipboard button to Quick Settings.
+6. Tap **Finish and start**.
 
 Check it from the laptop with `sharingd peers`; your phone should say `online`. After this you never need to open the app again.
 
 ## Automatic phone → laptop clipboard (optional)
 
 Android 10+ hides the clipboard from background apps, so out of the box phone → laptop copying takes one tap. This optional mode removes the tap by working around that restriction. It needs three one-time grants, one per-restart tap, and has trade-offs; read them first.
+
+**It needs a different APK.** The default build does not even declare the two permissions it uses. Build the opt-in one with `make apk-auto-clipboard` (or `make phone` with `SHARING_AUTO_CLIPBOARD=1` in the environment).
 
 **What it does.** It watches the phone's system log for the entry Android writes whenever the clipboard changes, then briefly shows a 1-pixel invisible window, which gives the app the focus Android requires to read the clipboard, and sends the text to the laptop.
 
@@ -110,20 +115,28 @@ Config lives in `~/.config/sharing` (override with `SHARING_CONFIG_DIR`). Deleti
 | Command | |
 | --- | --- |
 | `sharingd install` / `uninstall` | Add or remove the systemd user service and the file-manager "Send to phone" entries |
-| `sharingd setup [--dir PATH] [--name NAME]` | Set the laptop's base receive folder or device name, then show a pairing QR |
-| `sharingd pair` | Show a new pairing QR (valid 5 minutes) |
-| `sharingd peers` | List paired phones and whether they are online |
-| `sharingd unpair <id or name>` | Revoke a phone immediately |
-| `sharingd send [--to PEER] <path>...` | Send files or folders to a phone |
+| `sharingd setup [--dir PATH] [--name NAME] [--yes]` | Set the laptop's base receive folder or device name, then show a pairing QR |
+| `sharingd pair [--yes]` | Show a new pairing QR (valid 5 minutes) and ask before accepting the phone; `--yes` accepts without asking |
+| `sharingd peers` | List paired phones, whether they are online, and when each was last seen |
+| `sharingd unpair <id or name>` | Revoke a phone immediately (also deletes its offers and unfinished uploads) |
+| `sharingd rotate <id or name>` | Replace a phone's device token over its live connection (the old one works for 60 s) |
+| `sharingd send [--to PEER] [--wait] <path>...` | Send files or folders to a phone. Offline phones get them when they reconnect; `--wait` shows progress until done |
+| `sharingd transfers` | Active, queued and recent transfers in both directions with progress, speed, attempts and the last error |
+| `sharingd cancel <id>` / `retry <id>` | Cancel a transfer, or re-queue a failed one (ids may be abbreviated) |
+| `sharingd doctor` | Check the daemon, certificate, port, clipboard tool, receive-folder space and mDNS |
 | `sharingd run` | Run in the foreground (this is what the service does; a second copy refuses to start) |
 
-`make help` lists the build targets: `test`, `service`, `setup`, `logs` (follow the daemon's log), `phone`, `phone-quick`, `apk`, `apk-quick`, `daemon-uninstall`, `clean`.
+`make help` lists the build targets: `test`, `lint`, `bench`, `service`, `setup`, `logs` (follow the daemon's log), `phone`, `phone-quick`, `apk`, `apk-auto-clipboard`, `apk-quick`, `daemon-uninstall`, `clean`.
 
 ## Troubleshooting
 
 **`sharingd peers` shows the phone as `offline`.** Open the Sharing app once (Android may have stopped the service). Check both devices are on the same WiFi (guest networks often isolate clients) and that port 53317 is open. On the laptop `systemctl --user status sharingd` and `make logs` show what the daemon sees.
 
 **Pairing says "expired" or "already used".** Codes last 5 minutes and work once. Run `sharingd setup` for a new one.
+
+**Pairing waits, then says the laptop declined.** The laptop asks on the terminal where `sharingd pair`/`setup` is running; answer `y` within 90 seconds, or use `--yes`.
+
+**A transfer says "Waiting for your laptop".** The phone cannot reach the laptop right now; it keeps the item and sends it when the connection is back. `sharingd transfers` and `sharingd doctor` show the laptop's side.
 
 **"Can't reach your laptop" when pairing.** Wrong network, daemon not running, or a firewall blocking port 53317. The link contains the laptop's current IP, so generate a fresh one if you changed networks.
 
@@ -148,7 +161,7 @@ The laptop is the only server; the phone is always a client.
 1. The laptop serves HTTPS (TLS 1.2+) with a self-signed certificate and advertises `_sharing._tcp` over mDNS.
 2. Pairing: the QR carries the laptop's address, the certificate fingerprint, and a single-use token. The phone pins the fingerprint and exchanges the token for a long-term device token.
 3. The phone keeps an authenticated websocket open (last known address first, then mDNS, with backoff). Clipboard changes and "file ready" offers travel over it.
-4. Phone → laptop transfers are streamed uploads. Laptop → phone transfers are offered over the websocket, then downloaded by the phone. Folders travel as tar.
+4. Phone → laptop transfers are resumable uploads (`POST /uploads`, then `PATCH` from the offset the laptop reports with `HEAD`); a folder is one upload per file, published as a whole only when every file arrived. Laptop → phone transfers are offered over the websocket, then downloaded with HTTP `Range` requests; a folder is a frozen manifest downloaded file by file. The phone keeps a SQLite queue so work survives restarts, and old phones or laptops fall back to the single-request transfers of the first version.
 
 ```
 api/      sharingd, the laptop daemon (Go)
@@ -164,7 +177,8 @@ See [Security.md](Security.md) for the trust model and [Contributing.md](Contrib
 - Text clipboard only. Items over 1 MiB are ignored.
 - The file-manager integration targets Nautilus (and any file manager that supports Open With).
 - The release APK is debug-signed, so it is for your own devices, not an app store.
-- Automatic phone → laptop clipboard relies on a workaround that can break with Android or Samsung updates, and needs a tap after each service restart.
+- Automatic phone → laptop clipboard relies on a workaround that can break with Android or Samsung updates, needs a tap after each service restart, and lives in a separate opt-in APK.
+- Resuming a share-sheet file after the app was killed needs the file to be copied to the phone's spool when it was shared (done for files up to 256 MiB); bigger ones are retried only while Android still allows reading them, otherwise the notification says **Needs re-share**.
 
 ## License
 
