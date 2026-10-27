@@ -100,3 +100,6 @@ func (s *slots) acquire(peerID string, limit int) (release func(), ok bool) {
 		})
 	}, true
 }
+
+// FreeSpace reports free bytes on the filesystem holding dir (or its nearest existing parent).
+func FreeSpace(dir string) (uint64, error) { return freeBytes(dir) }

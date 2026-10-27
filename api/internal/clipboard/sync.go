@@ -2,6 +2,7 @@ package clipboard
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -10,8 +11,7 @@ import (
 )
 
 const (
-	MaxBytes     = protocol.MaxClipBytes // larger clips are ignored
-	pollInterval = 400 * time.Millisecond
+	MaxBytes = protocol.MaxClipBytes // larger clips are ignored
 )
 
 // Broadcaster delivers a message to all connected peers (the server hub).
@@ -30,14 +30,37 @@ type Syncer struct {
 	mu     sync.Mutex
 	last   string
 	lastTS int64
+	active time.Time // last change seen, local or remote
 	now    func() time.Time
+
+	rewatch time.Duration // pause between watch attempts
 }
 
 func NewSyncer(b Backend, out Broadcaster) *Syncer {
-	return &Syncer{Backend: b, Out: out, now: time.Now}
+	return &Syncer{Backend: b, Out: out, now: time.Now, rewatch: rewatchDelay}
 }
 
-// Run polls the local clipboard until ctx ends.
+// Polling cadence when the backend cannot watch: fast while the clipboard is
+// active, slow once it has been quiet for quietAfter. Any change (local or
+// from a peer) returns it to fast.
+const (
+	fastPoll   = 400 * time.Millisecond
+	slowPoll   = 2 * time.Second
+	quietAfter = 30 * time.Second
+	// rewatchDelay is how long to wait before restarting a watch that ended.
+	rewatchDelay = 5 * time.Second
+)
+
+// pollInterval chooses the delay before the next poll.
+func pollInterval(sinceChange time.Duration) time.Duration {
+	if sinceChange >= quietAfter {
+		return slowPoll
+	}
+	return fastPoll
+}
+
+// Run follows the local clipboard until ctx ends. It reacts to change events
+// when the backend can watch, and otherwise polls with an adaptive interval.
 func (s *Syncer) Run(ctx context.Context) {
 	// Treat what is already on the clipboard at startup as seen, not as news.
 	if v, err := s.Backend.Read(ctx); err == nil {
@@ -45,16 +68,74 @@ func (s *Syncer) Run(ctx context.Context) {
 		s.last = v
 		s.mu.Unlock()
 	}
-	t := time.NewTicker(pollInterval)
-	defer t.Stop()
+	s.markActive()
+	for ctx.Err() == nil {
+		w, ok := s.Backend.(Watcher)
+		if !ok {
+			s.pollFor(ctx, 0)
+			return
+		}
+		events, err := w.Watch(ctx)
+		if errors.Is(err, ErrNoWatch) {
+			s.pollFor(ctx, 0)
+			return
+		}
+		if err == nil {
+			s.follow(ctx, events)
+		}
+		// The watcher failed to start or died: poll for a while, then try it again.
+		s.pollFor(ctx, s.rewatch)
+	}
+}
+
+// follow polls once per change event until the channel closes.
+func (s *Syncer) follow(ctx context.Context, events <-chan struct{}) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-t.C:
+		case _, ok := <-events:
+			if !ok {
+				return
+			}
 			s.poll(ctx)
 		}
 	}
+}
+
+// pollFor polls adaptively; for d > 0 it returns after d, else it runs until ctx ends.
+func (s *Syncer) pollFor(ctx context.Context, d time.Duration) {
+	var stop <-chan time.Time
+	if d > 0 {
+		t := time.NewTimer(d)
+		defer t.Stop()
+		stop = t.C
+	}
+	timer := time.NewTimer(fastPoll)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-stop:
+			return
+		case <-timer.C:
+			s.poll(ctx)
+			timer.Reset(pollInterval(s.now().Sub(s.activeAt())))
+		}
+	}
+}
+
+func (s *Syncer) markActive() {
+	s.mu.Lock()
+	s.active = s.now()
+	s.mu.Unlock()
+}
+
+func (s *Syncer) activeAt() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.active
 }
 
 func (s *Syncer) poll(ctx context.Context) {
@@ -70,6 +151,7 @@ func (s *Syncer) poll(ctx context.Context) {
 	s.last = v
 	ts := s.now().UnixMilli()
 	s.lastTS = ts
+	s.active = s.now()
 	s.mu.Unlock()
 
 	s.Out.Broadcast(protocol.Message{Type: protocol.TypeClip, Mime: "text/plain", Data: v, TS: ts})
@@ -87,6 +169,7 @@ func (s *Syncer) HandleMessage(ctx context.Context, peerID string, m protocol.Me
 	}
 	s.last = m.Data
 	s.lastTS = m.TS
+	s.active = s.now()
 	s.mu.Unlock()
 
 	_ = s.Backend.Write(ctx, m.Data)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -102,3 +103,6 @@ func (e *env) restart(t *testing.T) *env {
 }
 
 func s(v string) *strings.Reader { return strings.NewReader(v) }
+
+func removeFile(p string) error { return os.Remove(p) }
+func removeAll(p string) error  { return os.RemoveAll(p) }

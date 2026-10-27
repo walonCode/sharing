@@ -145,3 +145,31 @@ func TestTransfersAndActionsThroughTheDaemon(t *testing.T) {
 	}
 	_ = svc
 }
+
+func TestCheckPortComparesCertificates(t *testing.T) {
+	ts := httptest.NewTLSServer(http.NotFoundHandler())
+	defer ts.Close()
+	port := ts.Listener.Addr().(*net.TCPAddr).Port
+	want := config.FingerprintDER(ts.Certificate().Raw)
+	if c := checkPort(port, want); c.status != "ok" {
+		t.Fatalf("matching cert: %v", c)
+	}
+	if c := checkPort(port, "deadbeef"); c.status != "FAIL" || !strings.Contains(c.detail, "different certificate") {
+		t.Fatalf("other cert: %v", c)
+	}
+	ts.Close()
+	if c := checkPort(port, want); c.status != "FAIL" {
+		t.Fatalf("closed port: %v", c)
+	}
+}
+
+func TestCheckDiskWarnsBelowReserve(t *testing.T) {
+	set := config.Settings{ReceiveDir: t.TempDir(), MinFreeBytes: 1 << 62}
+	if c := checkDisk(set); c.status != "warn" {
+		t.Fatalf("%v", c)
+	}
+	set.MinFreeBytes = 0
+	if c := checkDisk(set); c.status != "ok" {
+		t.Fatalf("%v", c)
+	}
+}

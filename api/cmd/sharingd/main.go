@@ -8,7 +8,7 @@ import (
 	"api/internal/service"
 )
 
-const usage = "run, pair, peers, unpair, rotate, send, transfers, cancel, retry, setup, install, uninstall"
+const usage = "run, pair, peers, unpair, rotate, send, transfers, cancel, retry, setup, doctor, install, uninstall"
 
 func main() {
 	cmd, args := "run", []string(nil)
@@ -23,6 +23,8 @@ func main() {
 		err = pair(args)
 	case "setup":
 		err = setup(args)
+	case "doctor":
+		err = doctor()
 	case "install":
 		err = install()
 	case "uninstall":

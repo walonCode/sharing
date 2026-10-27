@@ -2,9 +2,11 @@
 package clipboard
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,23 +19,86 @@ type Backend interface {
 	Write(ctx context.Context, text string) error
 }
 
+// Watcher is implemented by backends that can announce clipboard changes. The
+// channel closes when the watch ends (tool exited or ctx ended).
+type Watcher interface {
+	Watch(ctx context.Context) (<-chan struct{}, error)
+}
+
+var ErrNoWatch = errors.New("clipboard backend cannot watch for changes")
+
 var ErrNoBackend = errors.New("no clipboard tool found (install wl-clipboard, xclip, or xsel)")
 
 type execBackend struct {
 	read, write []string
+	// watch, when set, is a long-lived command that prints a line every time
+	// the clipboard changes (wl-paste --watch echo). It replaces polling.
+	watch []string
 }
 
+// Read returns the clipboard text, but never more than MaxBytes+1 bytes: a
+// larger value is ignored by the caller, so the rest is not worth reading
+// (a 200 MB copy would otherwise be pulled into memory on every poll).
 func (b execBackend) Read(ctx context.Context) (string, error) {
-	out, err := exec.CommandContext(ctx, b.read[0], b.read[1:]...).Output()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, b.read[0], b.read[1:]...) //nolint:gosec // fixed tool names from Detect
+	out, err := cmd.StdoutPipe()
 	if err != nil {
-		// Tools exit non-zero when the clipboard is empty or holds non-text data.
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
-			return "", nil
-		}
 		return "", err
 	}
-	return string(out), nil
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+	data, rerr := io.ReadAll(io.LimitReader(out, MaxBytes+1))
+	if len(data) > MaxBytes {
+		cancel() // stop the tool instead of draining the rest
+	}
+	werr := cmd.Wait()
+	if rerr != nil {
+		return "", rerr
+	}
+	if len(data) > MaxBytes {
+		return string(data), nil
+	}
+	if werr != nil {
+		// Tools exit non-zero when the clipboard is empty or holds non-text data.
+		var ee *exec.ExitError
+		if errors.As(werr, &ee) {
+			return "", nil
+		}
+		return "", werr
+	}
+	return string(data), nil
+}
+
+// Watch implements Watcher when the tool can report changes itself.
+func (b execBackend) Watch(ctx context.Context) (<-chan struct{}, error) {
+	if len(b.watch) == 0 {
+		return nil, ErrNoWatch
+	}
+	cmd := exec.CommandContext(ctx, b.watch[0], b.watch[1:]...) //nolint:gosec // fixed tool names from Detect
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	events := make(chan struct{}, 1)
+	go func() {
+		defer close(events)
+		sc := bufio.NewScanner(out)
+		sc.Buffer(make([]byte, 0, 4096), 1<<20)
+		for sc.Scan() {
+			select {
+			case events <- struct{}{}: // coalesce bursts into one event
+			default:
+			}
+		}
+		_ = cmd.Wait()
+	}()
+	return events, nil
 }
 
 func (b execBackend) Write(ctx context.Context, text string) error {
@@ -51,7 +116,13 @@ func Detect() (Backend, error) {
 	adoptWaylandSocket()
 	if os.Getenv("WAYLAND_DISPLAY") != "" {
 		if _, err := exec.LookPath("wl-paste"); err == nil {
-			return execBackend{read: []string{"wl-paste", "--no-newline", "--type", "text/plain"}, write: []string{"wl-copy", "--type", "text/plain"}}, nil
+			return execBackend{
+				read:  []string{"wl-paste", "--no-newline", "--type", "text/plain"},
+				write: []string{"wl-copy", "--type", "text/plain"},
+				// One long-lived process that prints a line per change; the
+				// command it runs (echo) ignores the clipboard on its stdin.
+				watch: []string{"wl-paste", "--type", "text/plain", "--watch", "echo"},
+			}, nil
 		}
 	}
 	if _, err := exec.LookPath("xclip"); err == nil {
@@ -81,4 +152,16 @@ func adoptWaylandSocket() {
 			return
 		}
 	}
+}
+
+// Describe names the backend and how it learns about changes, for `sharingd doctor`.
+func Describe(b Backend) string {
+	eb, ok := b.(execBackend)
+	if !ok || len(eb.read) == 0 {
+		return "custom backend"
+	}
+	if len(eb.watch) > 0 {
+		return eb.read[0] + " (event driven)"
+	}
+	return eb.read[0] + " (polling, 400 ms while active, 2 s when quiet)"
 }

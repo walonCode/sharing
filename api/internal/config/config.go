@@ -76,6 +76,7 @@ type Store struct {
 	mu       sync.RWMutex
 	settings Settings
 	peers    map[string]Peer
+	byHash   map[string]string    // token hash (current or previous) -> peer id
 	lastSave map[string]time.Time // last time a peer's lastSeen reached disk
 }
 
@@ -93,7 +94,7 @@ func Open(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	s := &Store{dir: dir, peers: map[string]Peer{}, lastSave: map[string]time.Time{}}
+	s := &Store{dir: dir, peers: map[string]Peer{}, byHash: map[string]string{}, lastSave: map[string]time.Time{}}
 	s.settings = Settings{
 		MaxUploadBytes:  DefaultMaxUploadBytes,
 		MaxEntries:      DefaultMaxEntries,
@@ -125,6 +126,7 @@ func Open(dir string) (*Store, error) {
 	for _, p := range peers {
 		s.peers[p.ID] = p
 	}
+	s.reindex()
 	return s, nil
 }
 
@@ -143,6 +145,30 @@ func (s *Store) UpdateSettings(fn func(*Settings)) error {
 	return s.saveSettings()
 }
 
+// reindex rebuilds the token-hash index. Callers hold s.mu for writing.
+func (s *Store) reindex() {
+	s.byHash = make(map[string]string, 2*len(s.peers))
+	for _, p := range s.peers {
+		s.byHash[p.TokenHash] = p.ID
+		if p.PrevTokenHash != "" {
+			s.byHash[p.PrevTokenHash] = p.ID
+		}
+	}
+}
+
+// PeerByTokenHash returns the peer whose current (or, during its grace
+// period, previous) token hash is hash. It is O(1) in the number of peers.
+func (s *Store) PeerByTokenHash(hash string, now time.Time) (Peer, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	id, ok := s.byHash[hash]
+	if !ok {
+		return Peer{}, false
+	}
+	p := s.peers[id]
+	return p, p.Matches(hash, now)
+}
+
 func (s *Store) Peers() []Peer {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -158,6 +184,7 @@ func (s *Store) AddPeer(p Peer) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.peers[p.ID] = p
+	s.reindex()
 	return s.savePeers()
 }
 
@@ -188,6 +215,7 @@ func (s *Store) RotatePeer(id, newHash string, now time.Time) error {
 	}
 	p.PrevTokenHash, p.PrevExpires, p.TokenHash = p.TokenHash, now.Add(RotationGrace), newHash
 	s.peers[id] = p
+	s.reindex()
 	return s.savePeers()
 }
 
@@ -197,6 +225,7 @@ func (s *Store) RemovePeer(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.peers, id)
+	s.reindex()
 	return s.savePeers()
 }
 

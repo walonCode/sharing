@@ -120,3 +120,35 @@ func TestRotatePeerKeepsOldHashForTheGracePeriod(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestTokenIndexFollowsPeerChanges(t *testing.T) {
+	s, _ := Open(t.TempDir())
+	now := time.Now()
+	_ = s.AddPeer(Peer{ID: "a", TokenHash: "ha"})
+	_ = s.AddPeer(Peer{ID: "b", TokenHash: "hb"})
+	if p, ok := s.PeerByTokenHash("hb", now); !ok || p.ID != "b" {
+		t.Fatalf("lookup b: %v %v", p, ok)
+	}
+	_ = s.RotatePeer("a", "ha2", now)
+	for _, h := range []string{"ha", "ha2"} {
+		if p, ok := s.PeerByTokenHash(h, now); !ok || p.ID != "a" {
+			t.Fatalf("lookup %s during grace: %v %v", h, p, ok)
+		}
+	}
+	if _, ok := s.PeerByTokenHash("ha", now.Add(2*RotationGrace)); ok {
+		t.Fatal("old hash must stop matching after the grace period")
+	}
+	_ = s.RemovePeer("b")
+	if _, ok := s.PeerByTokenHash("hb", now); ok {
+		t.Fatal("removed peer still authenticates")
+	}
+	// Re-pairing the same device replaces its hash.
+	_ = s.AddPeer(Peer{ID: "a", TokenHash: "ha3"})
+	if _, ok := s.PeerByTokenHash("ha2", now); ok {
+		t.Fatal("replaced token still authenticates")
+	}
+	reopened, _ := Open(s.Dir())
+	if p, ok := reopened.PeerByTokenHash("ha3", now); !ok || p.ID != "a" {
+		t.Fatal("index not rebuilt on open")
+	}
+}

@@ -88,8 +88,8 @@ func advertise(ctx context.Context, info Info, every time.Duration, addrs func()
 	}
 }
 
-// Browse returns the first matching service seen before ctx ends (used by tests
-// and `sharingd` diagnostics; the phone does the same via NsdManager).
+// Browse returns the first matching service seen before ctx ends. It backs
+// `sharingd doctor` and the tests; the phone does the same via NsdManager.
 func Browse(ctx context.Context, match func(Info) bool) (Info, string, error) {
 	resolver, err := zeroconf.NewResolver(nil)
 	if err != nil {

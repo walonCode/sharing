@@ -197,8 +197,10 @@ func SaveFileLimited(r io.Reader, destDir, name string, lim Limits) (string, err
 }
 
 // publish moves src into dir as name, appending " (n)" until the name is free.
-// os.Link/Rename races are avoided by retrying on EEXIST for files; directories
-// use Rename, which fails if the target is a non-empty dir.
+// Files are hard-linked into place (link fails if the name exists, so an
+// existing file is never overwritten, even by a concurrent publish) and the
+// caller removes the source. Directories use Rename, which fails if the target
+// is a non-empty directory, so they are never merged into an existing one.
 func publish(src, dir, name string) (string, error) {
 	ext := filepath.Ext(name)
 	base := strings.TrimSuffix(name, ext)

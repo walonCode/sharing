@@ -84,12 +84,10 @@ func (s *Server) auth(next http.Handler) http.Handler {
 		if ok && token != "" {
 			hash := pairing.HashToken(token)
 			now := s.now()
-			for _, p := range s.Store.Peers() {
-				if p.Matches(hash, now) {
-					s.Store.TouchPeer(p.ID, now)
-					next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, p)))
-					return
-				}
+			if p, ok := s.Store.PeerByTokenHash(hash, now); ok {
+				s.Store.TouchPeer(p.ID, now)
+				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, p)))
+				return
 			}
 		}
 		s.limiter.fail(ip)
