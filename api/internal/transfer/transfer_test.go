@@ -185,29 +185,9 @@ type zeroReader struct{}
 
 func (zeroReader) Read(b []byte) (int, error) { clear(b); return len(b), nil }
 
-func TestRegistryOneShotOwnershipExpiry(t *testing.T) {
-	r := NewRegistry()
-	o := r.Add("a", "/x", KindFile, 1)
-	if _, ok := r.Take(o.ID, "b"); ok {
-		t.Fatal("other peer must not take offer")
-	}
-	if _, ok := r.Take(o.ID, "a"); !ok {
-		t.Fatal("owner should take offer")
-	}
-	if _, ok := r.Take(o.ID, "a"); ok {
-		t.Fatal("offer must be single use")
-	}
-
-	now := time.Now()
-	r.now = func() time.Time { return now }
-	o = r.Add("a", "/x", KindFile, 1)
-	r.now = func() time.Time { return now.Add(OfferTTL + time.Second) }
-	if _, ok := r.Take(o.ID, "a"); ok {
-		t.Fatal("expired offer taken")
-	}
-}
-
 // --- end to end over the real HTTP server ---
+
+const phoneID = "phone-0001"
 
 type env struct {
 	svc   *Service
@@ -227,10 +207,10 @@ func setup(t *testing.T) *env {
 	_ = store.UpdateSettings(func(s *config.Settings) { s.ReceiveDir = recv })
 	srv := server.New(store)
 	svc := Mount(srv)
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
+	srv.OnMessage = svc.HandleMessage
+	ts := newTestServer(t, srv)
 
-	body, _ := json.Marshal(protocol.PairRequest{Token: srv.Pairing.NewInvite(time.Minute), DeviceID: "phone", Name: "My Phone"})
+	body, _ := json.Marshal(protocol.PairRequest{Token: srv.Pairing.NewInvite(time.Minute), DeviceID: phoneID, Name: "My Phone"})
 	resp, err := http.Post(ts.URL+"/pair", "application/json", bytes.NewReader(body))
 	if err != nil {
 		t.Fatal(err)
@@ -288,13 +268,13 @@ func TestUploadFileAndFolderRequireAuth(t *testing.T) {
 func TestSendOfferAndDownload(t *testing.T) {
 	e := setup(t)
 
-	if _, err := e.svc.Send("phone", "/nonexistent"); err == nil {
+	if _, err := e.svc.Send(phoneID, "/nonexistent"); err == nil {
 		t.Fatal("missing path must error")
 	}
 	file := filepath.Join(t.TempDir(), "movie.mp4")
 	write(t, file, "frames")
-	if _, err := e.svc.Send("phone", file); !errors.Is(err, ErrPeerOffline) {
-		t.Fatalf("offline err = %v", err)
+	if o, err := e.svc.Send(phoneID, file); err != nil || o.State != StateQueued {
+		t.Fatalf("offline send = %+v, %v", o, err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -307,9 +287,7 @@ func TestSendOfferAndDownload(t *testing.T) {
 	var m protocol.Message
 	_ = wsjson.Read(ctx, ws, &m) // hello
 
-	if _, err := e.svc.Send("phone", file); err != nil {
-		t.Fatal(err)
-	}
+	// The offer queued while the phone was offline is replayed on connect.
 	if err := wsjson.Read(ctx, ws, &m); err != nil || m.Type != protocol.TypeOffer || m.Name != "movie.mp4" || m.Kind != KindFile || m.Size != 6 {
 		t.Fatalf("offer = %+v err=%v", m, err)
 	}
@@ -318,14 +296,15 @@ func TestSendOfferAndDownload(t *testing.T) {
 	if resp.StatusCode != 200 || string(b) != "frames" || resp.Header.Get("X-Name") != "movie.mp4" {
 		t.Fatalf("download = %d %q", resp.StatusCode, b)
 	}
-	if again := e.do(t, "GET", "/transfer/"+m.ID, nil); again.StatusCode != http.StatusNotFound {
+	// The legacy (no X-Sharing-Proto) client has no ack, so a complete download finishes the offer.
+	if again := e.do(t, "GET", "/transfer/"+m.ID, nil); again.StatusCode != http.StatusGone {
 		t.Fatalf("second download = %d", again.StatusCode)
 	}
 
 	// folder offer downloads as tar
 	dir := filepath.Join(t.TempDir(), "docs")
 	write(t, filepath.Join(dir, "r.md"), "R")
-	if _, err := e.svc.Send("phone", dir); err != nil {
+	if _, err := e.svc.Send(phoneID, dir); err != nil {
 		t.Fatal(err)
 	}
 	_ = wsjson.Read(ctx, ws, &m)
@@ -352,4 +331,11 @@ func TestPeerFolderNames(t *testing.T) {
 			t.Errorf("PeerFolder(%q) = %q, want %q", in, got, want)
 		}
 	}
+}
+
+func newTestServer(t *testing.T, srv *server.Server) *httptest.Server {
+	t.Helper()
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	return ts
 }

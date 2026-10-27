@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -32,25 +33,32 @@ func (h *Hub) Online(peerID string) bool {
 	return ok
 }
 
-// Send queues a message for the peer; false if offline or its buffer is full.
-func (h *Hub) Send(peerID string, m protocol.Message) bool {
+// Why a Send failed.
+var (
+	ErrOffline = errors.New("peer is offline")
+	ErrBusy    = errors.New("peer connection is busy; try again")
+)
+
+// Send queues a message for the peer. It returns ErrOffline when no socket is
+// open and ErrBusy when the socket is open but its buffer is full.
+func (h *Hub) Send(peerID string, m protocol.Message) error {
 	h.mu.RLock()
 	c := h.conns[peerID]
 	h.mu.RUnlock()
 	if c == nil {
-		return false
+		return ErrOffline
 	}
 	select {
 	case c.out <- m:
-		return true
+		return nil
 	default:
-		return false
+		return ErrBusy
 	}
 }
 
 // serve pumps messages until the socket dies. A newer connection from the same
 // peer replaces the old one.
-func (h *Hub) serve(ctx context.Context, peerID string, ws *websocket.Conn, hello protocol.Message, onMessage func(protocol.Message)) {
+func (h *Hub) serve(ctx context.Context, peerID string, ws *websocket.Conn, hello protocol.Message, onMessage func(protocol.Message), onConnect func()) {
 	ctx, cancel := context.WithCancel(ctx)
 	c := &conn{out: make(chan protocol.Message, 16), cancel: cancel}
 
@@ -70,6 +78,9 @@ func (h *Hub) serve(ctx context.Context, peerID string, ws *websocket.Conn, hell
 	}()
 
 	c.out <- hello
+	if onConnect != nil {
+		go onConnect()
+	}
 
 	go func() { // reader
 		defer cancel()

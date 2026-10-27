@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	MaxBytes     = 1 << 20 // larger clips are ignored
+	MaxBytes     = protocol.MaxClipBytes // larger clips are ignored
 	pollInterval = 400 * time.Millisecond
 )
 
