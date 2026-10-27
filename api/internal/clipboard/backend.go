@@ -147,8 +147,8 @@ func adoptWaylandSocket() {
 	socks, _ := filepath.Glob(filepath.Join(dir, "wayland-[0-9]*"))
 	for _, sock := range socks {
 		if !strings.HasSuffix(sock, ".lock") {
-			os.Setenv("XDG_RUNTIME_DIR", dir)
-			os.Setenv("WAYLAND_DISPLAY", filepath.Base(sock))
+			_ = os.Setenv("XDG_RUNTIME_DIR", dir)
+			_ = os.Setenv("WAYLAND_DISPLAY", filepath.Base(sock))
 			return
 		}
 	}

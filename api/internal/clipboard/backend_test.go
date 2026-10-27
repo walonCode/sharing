@@ -19,7 +19,7 @@ func TestDetectedBackendRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Skipf("no usable clipboard session: %v", err)
 	}
-	defer b.Write(ctx, prev)
+	defer func() { _ = b.Write(ctx, prev) }()
 	if err := b.Write(ctx, "sharing-test ✓"); err != nil {
 		t.Skipf("cannot write clipboard: %v", err)
 	}

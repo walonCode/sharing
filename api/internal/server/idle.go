@@ -2,7 +2,6 @@ package server
 
 import (
 	"io"
-	"net"
 	"net/http"
 	"time"
 )
@@ -12,10 +11,9 @@ import (
 var (
 	// IdleTimeout is how long a transfer may go without moving a byte.
 	IdleTimeout = 30 * time.Second
-	// HeaderTimeout bounds reading a request's headers.
+	// HeaderTimeout bounds reading a request's headers. net/http also applies it to the TLS
+	// handshake, so a client that connects and says nothing is cut after the same time.
 	HeaderTimeout = 10 * time.Second
-	// HandshakeTimeout bounds the time from accept to the first request byte.
-	HandshakeTimeout = 15 * time.Second
 )
 
 // withIdleDeadline cuts a request whose peer stalls. A global ReadTimeout or
@@ -58,7 +56,7 @@ func (w *idleWriter) Write(p []byte) (int, error) {
 func (w *idleWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // NewHTTPServer returns an http.Server with header, idle, and size limits for
-// an internet-facing listener. Per-request body timeouts come from
+// a listener that strangers on the LAN can reach. Per-request body timeouts come from
 // withIdleDeadline instead of ReadTimeout/WriteTimeout.
 func NewHTTPServer(addr string, h http.Handler) *http.Server {
 	return &http.Server{
@@ -67,16 +65,5 @@ func NewHTTPServer(addr string, h http.Handler) *http.Server {
 		ReadHeaderTimeout: HeaderTimeout,
 		IdleTimeout:       2 * time.Minute,
 		MaxHeaderBytes:    16 << 10,
-		// ReadHeaderTimeout starts only after the TLS handshake, so a client
-		// that connects and says nothing would hold a connection forever. Give
-		// every new connection a deadline that lasts until its first request.
-		ConnState: func(c net.Conn, st http.ConnState) {
-			switch st {
-			case http.StateNew:
-				_ = c.SetDeadline(time.Now().Add(HandshakeTimeout))
-			case http.StateActive:
-				_ = c.SetDeadline(time.Time{})
-			}
-		},
 	}
 }

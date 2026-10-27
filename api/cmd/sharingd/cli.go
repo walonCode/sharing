@@ -219,7 +219,7 @@ func send(args []string) (err error) {
 		defer func() { notify(len(paths), err) }()
 	}
 	if perr != nil || len(paths) == 0 {
-		return fmt.Errorf("usage: sharingd send [--to <peer>] [--wait] <path>...")
+		return fmt.Errorf("usage: sharingd send [--to <peer>] [--wait] <path> [<path> ...]")
 	}
 	var ids []string
 	for _, p := range paths {

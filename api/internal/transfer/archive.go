@@ -22,8 +22,15 @@ var ErrUnsafePath = errors.New("unsafe path in archive")
 func Pack(w io.Writer, dir string) error {
 	dir = filepath.Clean(dir)
 	root := filepath.Base(dir)
+	// Files are opened through a rooted handle so a directory replaced by a symlink after the
+	// walk reached it cannot lead the open outside the folder being packed.
+	rooted, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer rooted.Close()
 	tw := tar.NewWriter(w)
-	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -43,7 +50,7 @@ func Pack(w io.Writer, dir string) error {
 			if err := tw.WriteHeader(&tar.Header{Typeflag: tar.TypeReg, Name: name, Mode: 0o644, Size: info.Size(), ModTime: info.ModTime()}); err != nil {
 				return err
 			}
-			f, err := os.Open(p)
+			f, err := rooted.Open(filepath.FromSlash(filepath.ToSlash(rel)))
 			if err != nil {
 				return err
 			}

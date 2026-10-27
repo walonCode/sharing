@@ -27,7 +27,7 @@ func (f *fakeBackend) Write(_ context.Context, t string) error {
 	f.text = t
 	return nil
 }
-func (f *fakeBackend) set(t string) { f.Write(context.Background(), t) }
+func (f *fakeBackend) set(t string) { _ = f.Write(context.Background(), t) }
 
 type recorder struct {
 	mu   sync.Mutex

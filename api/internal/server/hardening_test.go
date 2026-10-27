@@ -40,9 +40,9 @@ func errorsAsTimeout(err error, ne *net.Error) bool {
 
 func shortTimeouts(t *testing.T) {
 	t.Helper()
-	oh, oa, oi := server.HeaderTimeout, server.HandshakeTimeout, server.IdleTimeout
-	server.HeaderTimeout, server.HandshakeTimeout, server.IdleTimeout = 300*time.Millisecond, 300*time.Millisecond, 300*time.Millisecond
-	t.Cleanup(func() { server.HeaderTimeout, server.HandshakeTimeout, server.IdleTimeout = oh, oa, oi })
+	oh, oi := server.HeaderTimeout, server.IdleTimeout
+	server.HeaderTimeout, server.IdleTimeout = 300*time.Millisecond, 300*time.Millisecond
+	t.Cleanup(func() { server.HeaderTimeout, server.IdleTimeout = oh, oi })
 }
 
 func realConfigServer(t *testing.T, s *server.Server) *httptest.Server {
@@ -77,10 +77,10 @@ func TestSilentConnectionIsCut(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	expectClosed(t, conn, 3*time.Second) // never sends a byte (stalled TLS handshake looks the same)
+	expectClosed(t, conn, 3*time.Second) // never sends a byte (net/http applies the same limit to a stalled TLS handshake)
 }
 
-func TestKeepAliveAfterRequestIsNotCutByHandshakeTimer(t *testing.T) {
+func TestKeepAliveConnectionOutlivesTheHeaderTimeout(t *testing.T) {
 	shortTimeouts(t)
 	s, _ := newServer(t)
 	ts := realConfigServer(t, s)
@@ -96,7 +96,7 @@ func TestKeepAliveAfterRequestIsNotCutByHandshakeTimer(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	time.Sleep(500 * time.Millisecond) // longer than the handshake timer
+	time.Sleep(500 * time.Millisecond) // longer than the header timeout
 	_, _ = conn.Write([]byte("GET /nothing HTTP/1.1\r\nHost: x\r\n\r\n"))
 	if resp, err = http.ReadResponse(br, nil); err != nil {
 		t.Fatalf("second request on a live connection failed: %v", err)

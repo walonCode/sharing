@@ -14,8 +14,6 @@ import (
 	"github.com/coder/websocket/wsjson"
 )
 
-var v2 = map[string]string{protocol.HeaderProto: "2"}
-
 func hdr(extra ...string) map[string]string {
 	h := map[string]string{protocol.HeaderProto: "2"}
 	for i := 0; i+1 < len(extra); i += 2 {

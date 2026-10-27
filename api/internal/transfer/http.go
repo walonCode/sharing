@@ -142,6 +142,9 @@ func (s *Service) handleUpload(w http.ResponseWriter, r *http.Request) {
 		fail(w, err)
 		return
 	}
+	// The name comes from the phone; make sure no client ever renders it as HTML.
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusCreated)
 	fmt.Fprintln(w, got)
 }

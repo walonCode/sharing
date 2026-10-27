@@ -82,8 +82,9 @@ func runChecks(store *config.Store) []check {
 
 // checkPort dials the HTTPS port and compares the certificate it presents with ours.
 func checkPort(port int, want string) check {
-	conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 3 * time.Second}, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)),
-		&tls.Config{InsecureSkipVerify: true}) //nolint:gosec // we compare the fingerprint ourselves
+	// The certificate is self-signed, so chain verification is skipped and the fingerprint is compared below.
+	cfg := &tls.Config{InsecureSkipVerify: true} // #nosec G402
+	conn, err := tls.DialWithDialer(&net.Dialer{Timeout: 3 * time.Second}, "tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), cfg)
 	if err != nil {
 		return check{"port", "FAIL", fmt.Sprintf("nothing answering TLS on :%d (%v)", port, err)}
 	}

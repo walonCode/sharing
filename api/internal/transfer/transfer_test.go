@@ -86,7 +86,7 @@ func tarOf(t *testing.T, hs ...tar.Header) *bytes.Buffer {
 			t.Fatal(err)
 		}
 		if h.Typeflag == tar.TypeReg {
-			io.WriteString(tw, strings.Repeat("x", int(h.Size)))
+			_, _ = io.WriteString(tw, strings.Repeat("x", int(h.Size)))
 		}
 	}
 	tw.Close()
