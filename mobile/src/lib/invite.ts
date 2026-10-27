@@ -23,3 +23,8 @@ export function parseInvite(raw: string): Invite | null {
   if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
   return { host, port, fingerprint, token, name: q.get("name") || "laptop" };
 }
+
+/** "abcd 1234 ef56 7890": the first 16 hex digits of the fingerprint, grouped to be compared by eye with the laptop. */
+export function fingerprintPreview(fingerprint: string): string {
+  return (fingerprint.slice(0, 16).match(/.{1,4}/g) ?? []).join(" ");
+}

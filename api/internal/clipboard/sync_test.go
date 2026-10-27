@@ -27,7 +27,7 @@ func (f *fakeBackend) Write(_ context.Context, t string) error {
 	f.text = t
 	return nil
 }
-func (f *fakeBackend) set(t string) { f.Write(context.Background(), t) }
+func (f *fakeBackend) set(t string) { _ = f.Write(context.Background(), t) }
 
 type recorder struct {
 	mu   sync.Mutex
@@ -147,4 +147,134 @@ func TestManagerWaitsForClipboardSession(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+func TestPollIntervalBacksOffWhenQuiet(t *testing.T) {
+	if pollInterval(0) != fastPoll || pollInterval(quietAfter-time.Second) != fastPoll {
+		t.Fatal("active clipboard must poll fast")
+	}
+	if pollInterval(quietAfter) != slowPoll || pollInterval(time.Hour) != slowPoll {
+		t.Fatal("quiet clipboard must poll slowly")
+	}
+}
+
+// watchBackend is a fakeBackend that announces changes itself.
+type watchBackend struct {
+	fakeBackend
+	wmu    sync.Mutex
+	events chan struct{}
+	starts atomic.Int32
+}
+
+func (w *watchBackend) Watch(context.Context) (<-chan struct{}, error) {
+	w.starts.Add(1)
+	w.wmu.Lock()
+	defer w.wmu.Unlock()
+	return w.events, nil
+}
+
+func waitUntil(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	for range 300 {
+		if cond() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}
+
+func TestWatchEventsDriveReadsWithoutPolling(t *testing.T) {
+	b := &watchBackend{events: make(chan struct{}, 1)}
+	r := &recorder{}
+	s := NewSyncer(b, r)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.Run(ctx)
+	time.Sleep(2 * fastPoll) // longer than a poll tick: a polling loop would have noticed a silent change
+	b.set("changed silently")
+	time.Sleep(2 * fastPoll)
+	if r.count() != 0 {
+		t.Fatal("a watch-driven syncer must not poll")
+	}
+	b.events <- struct{}{}
+	waitUntil(t, "broadcast after the change event", func() bool { return r.count() == 1 })
+	if r.sent[0].Data != "changed silently" {
+		t.Fatalf("sent %+v", r.sent)
+	}
+}
+
+func TestDeadWatcherFallsBackToPollingThenRewatches(t *testing.T) {
+	b := &watchBackend{events: make(chan struct{})}
+	r := &recorder{}
+	s := NewSyncer(b, r)
+	s.rewatch = 1500 * time.Millisecond // must exceed fastPoll or the fallback never gets a tick
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go s.Run(ctx)
+	waitUntil(t, "first watch", func() bool { return b.starts.Load() == 1 })
+	b.wmu.Lock()
+	dead := b.events
+	b.events = make(chan struct{}) // what the next watch attempt gets
+	b.wmu.Unlock()
+	close(dead) // the watch tool died
+	b.set("typed while the watcher was down")
+	waitUntil(t, "poll fallback to notice the change", func() bool { return r.count() == 1 })
+	waitUntil(t, "watch restart", func() bool { return b.starts.Load() >= 2 })
+}
+
+func TestExecReadIsCappedAndDoesNotDrainHugeClipboards(t *testing.T) {
+	be := execBackend{read: []string{"sh", "-c", "head -c 209715200 /dev/zero"}}
+	start := time.Now()
+	v, err := be.Read(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v) != MaxBytes+1 {
+		t.Fatalf("read %d bytes, want exactly MaxBytes+1 so the caller can ignore it", len(v))
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatal("reading a huge clipboard was not cut short")
+	}
+	// The syncer ignores it.
+	s, fb, r := newTest()
+	fb.set(v)
+	s.poll(context.Background())
+	if r.count() != 0 {
+		t.Fatal("an oversized clip must not be sent")
+	}
+}
+
+func TestExecReadTreatsToolFailureAsEmpty(t *testing.T) {
+	v, err := execBackend{read: []string{"sh", "-c", "exit 1"}}.Read(context.Background())
+	if v != "" || err != nil {
+		t.Fatalf("got %q, %v", v, err)
+	}
+	if _, err := (execBackend{read: []string{"/definitely/not/installed"}}).Read(context.Background()); err == nil {
+		t.Fatal("a missing tool is an error")
+	}
+	v, _ = execBackend{read: []string{"printf", "héllo"}}.Read(context.Background())
+	if v != "héllo" {
+		t.Fatalf("got %q", v)
+	}
+}
+
+func TestExecWatchEmitsOneEventPerLine(t *testing.T) {
+	be := execBackend{watch: []string{"sh", "-c", "echo; sleep 0.1; echo; sleep 0.1; echo"}}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	events, err := be.Watch(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for range events {
+		n++
+	}
+	if n < 2 || n > 3 {
+		t.Fatalf("events = %d, want 2 or 3 (bursts may coalesce)", n)
+	}
+	if _, err := (execBackend{}).Watch(ctx); err != ErrNoWatch {
+		t.Fatalf("no watch command = %v", err)
+	}
 }

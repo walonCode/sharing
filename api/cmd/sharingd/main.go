@@ -2,308 +2,52 @@
 package main
 
 import (
-	"bytes"
-	"context"
-	"crypto/tls"
-	"encoding/json"
-	"errors"
-	"flag"
 	"fmt"
-	"github.com/skip2/go-qrcode"
-	"io"
-	"log"
-	"net/http"
-	"net/url"
 	"os"
-	"os/exec"
-	"os/signal"
-	"path/filepath"
-	"strconv"
-	"strings"
-	"syscall"
-	"time"
 
-	"api/internal/clipboard"
-	"api/internal/config"
-	"api/internal/control"
-	"api/internal/discovery"
-	"api/internal/protocol"
-	"api/internal/server"
 	"api/internal/service"
-	"api/internal/transfer"
 )
 
+const usage = "run, pair, peers, unpair, rotate, send, transfers, cancel, retry, setup, doctor, install, uninstall"
+
 func main() {
-	cmd := "run"
+	cmd, args := "run", []string(nil)
 	if len(os.Args) > 1 {
-		cmd = os.Args[1]
+		cmd, args = os.Args[1], os.Args[2:]
 	}
 	var err error
 	switch cmd {
 	case "run":
 		err = run()
 	case "pair":
-		err = pair()
+		err = pair(args)
 	case "setup":
-		err = setup(os.Args[2:])
+		err = setup(args)
+	case "doctor":
+		err = doctor()
 	case "install":
 		err = install()
 	case "uninstall":
 		err = service.Uninstall()
 	case "unpair":
-		err = unpair(os.Args[2:])
+		err = unpair(args)
+	case "rotate":
+		err = rotate(args)
 	case "send":
-		err = send(os.Args[2:])
+		err = send(args)
 	case "peers":
 		err = peers()
+	case "transfers":
+		err = transfers()
+	case "cancel":
+		err = transferAction("cancel", args)
+	case "retry":
+		err = transferAction("retry", args)
 	default:
-		err = fmt.Errorf("unknown command %q (run, pair, peers, unpair, send, setup, install, uninstall)", cmd)
+		err = fmt.Errorf("unknown command %q (%s)", cmd, usage)
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "sharingd:", err)
 		os.Exit(1)
 	}
-}
-
-func run() error {
-	dir, err := config.DefaultDir()
-	if err != nil {
-		return err
-	}
-	if d := os.Getenv("SHARING_CONFIG_DIR"); d != "" {
-		dir = d
-	}
-	store, err := config.Open(dir)
-	if err != nil {
-		return err
-	}
-	cert, err := store.Certificate()
-	if err != nil {
-		return err
-	}
-	srv := server.New(store)
-	svc := transfer.Mount(srv)
-
-	httpSrv := &http.Server{
-		Addr:      ":" + strconv.Itoa(store.Settings().Port),
-		Handler:   srv.Handler(),
-		TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12},
-	}
-	sock, err := control.Listen(control.SocketPath())
-	if err != nil {
-		if errors.Is(err, control.ErrAlreadyRunning) {
-			return fmt.Errorf("%w (check: systemctl --user status sharingd)", err)
-		}
-		return err
-	}
-	ctrl := &http.Server{Handler: control.Handler(srv, svc, config.Fingerprint(cert))}
-
-	errc := make(chan error, 3)
-	go func() { errc <- httpSrv.ListenAndServeTLS("", "") }()
-	go func() { errc <- ctrl.Serve(sock) }()
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	set := store.Settings()
-	go func() {
-		errc <- discovery.Advertise(ctx, discovery.Info{ID: set.DeviceID, Name: set.Name, Fingerprint: config.Fingerprint(cert), Port: set.Port})
-	}()
-	clip := clipboard.NewManager(srv.Hub)
-	srv.OnMessage = func(peerID string, m protocol.Message) { clip.HandleMessage(ctx, peerID, m) }
-	go clip.Run(ctx)
-	log.Printf("sharingd listening on %s as %q", httpSrv.Addr, store.Settings().Name)
-
-	select {
-	case <-ctx.Done():
-	case err := <-errc:
-		return err
-	}
-	sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_ = httpSrv.Shutdown(sctx)
-	_ = ctrl.Shutdown(sctx)
-	_ = os.Remove(control.SocketPath())
-	return nil
-}
-
-func pair() error {
-	resp, err := control.Client(control.SocketPath()).Post("http://sharingd/invite", "application/json", nil)
-	if err != nil {
-		return fmt.Errorf("is the daemon running? %w", err)
-	}
-	defer resp.Body.Close()
-	var out control.InviteResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return err
-	}
-	fmt.Println("Scan this in the app, or paste the link (valid 5 minutes):")
-	if qr, err := qrcode.New(out.URL, qrcode.Low); err == nil {
-		fmt.Println(qr.ToSmallString(false))
-	}
-	fmt.Println(out.URL)
-	return nil
-}
-
-func peers() error {
-	resp, err := control.Client(control.SocketPath()).Get("http://sharingd/peers")
-	if err != nil {
-		return fmt.Errorf("is the daemon running? %w", err)
-	}
-	defer resp.Body.Close()
-	var list []struct {
-		ID, Name string
-		Online   bool
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
-		return err
-	}
-	for _, p := range list {
-		state := "offline"
-		if p.Online {
-			state = "online"
-		}
-		fmt.Printf("%s\t%s\t%s\n", p.ID, p.Name, state)
-	}
-	return nil
-}
-
-// send asks the running daemon to offer a file or folder to a paired phone.
-// Usage: sharingd send [--to <id|name>] <path>...
-func send(args []string) (err error) {
-	// Launched from a file manager there is no terminal to show the result in.
-	if !isTerminal(os.Stdout) {
-		defer func() { notify(args, err) }()
-	}
-	var to string
-	var paths []string
-	for i := 0; i < len(args); i++ {
-		if args[i] == "--to" && i+1 < len(args) {
-			to = args[i+1]
-			i++
-			continue
-		}
-		paths = append(paths, args[i])
-	}
-	if len(paths) == 0 {
-		return fmt.Errorf("usage: sharingd send [--to <peer>] <path>...")
-	}
-	client := control.Client(control.SocketPath())
-	for _, p := range paths {
-		abs, err := filepath.Abs(p)
-		if err != nil {
-			return err
-		}
-		body, _ := json.Marshal(control.SendRequest{Path: abs, Peer: to})
-		resp, err := client.Post("http://sharingd/send", "application/json", bytes.NewReader(body))
-		if err != nil {
-			return fmt.Errorf("is the daemon running? %w", err)
-		}
-		msg, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusAccepted {
-			return fmt.Errorf("%s: %s", p, strings.TrimSpace(string(msg)))
-		}
-		fmt.Println("offered", abs)
-	}
-	return nil
-}
-
-// setup stores the receive folder (and optionally the device name), then shows
-// a pairing QR. It edits the running daemon through the control socket.
-func setup(args []string) error {
-	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
-	dir := fs.String("dir", "", "folder where received files are saved")
-	name := fs.String("name", "", "device name shown on the phone")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if *dir != "" {
-		abs, err := filepath.Abs(*dir)
-		if err != nil {
-			return err
-		}
-		*dir = abs
-		if err := os.MkdirAll(abs, 0o755); err != nil {
-			return err
-		}
-	}
-	if *dir != "" || *name != "" {
-		body, _ := json.Marshal(control.SettingsRequest{ReceiveDir: *dir, Name: *name})
-		resp, err := control.Client(control.SocketPath()).Post("http://sharingd/settings", "application/json", bytes.NewReader(body))
-		if err != nil {
-			return fmt.Errorf("daemon not running; run `sharingd install` first: %w", err)
-		}
-		msg, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			return fmt.Errorf("%s", strings.TrimSpace(string(msg)))
-		}
-		fmt.Println("saved settings")
-	}
-	return pair()
-}
-
-// install registers sharingd as a systemd user service that starts at login.
-func install() error {
-	path, err := service.Install()
-	if err != nil {
-		return err
-	}
-	fmt.Println("installed and started", path)
-	if err := service.EnableLinger(); err != nil {
-		fmt.Println("could not keep it running while logged out; run: loginctl enable-linger", err)
-	} else {
-		fmt.Println("it will start at boot and keep running after you log out")
-	}
-	fmt.Println("Next: sharingd setup --dir ~/Downloads/Sharing")
-	return nil
-}
-
-// unpair revokes a phone: its token stops working and its connection is closed.
-func unpair(args []string) error {
-	if len(args) != 1 {
-		return fmt.Errorf("usage: sharingd unpair <id or name>")
-	}
-	req, _ := http.NewRequest(http.MethodDelete, "http://sharingd/peers/"+url.PathEscape(args[0]), nil)
-	resp, err := control.Client(control.SocketPath()).Do(req)
-	if err != nil {
-		return fmt.Errorf("is the daemon running? %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusNoContent {
-		msg, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("%s", strings.TrimSpace(string(msg)))
-	}
-	fmt.Println("unpaired", args[0])
-	return nil
-}
-
-func isTerminal(f *os.File) bool {
-	st, err := f.Stat()
-	return err == nil && st.Mode()&os.ModeCharDevice != 0
-}
-
-// notify reports the outcome of a send as a desktop notification, if possible.
-func notify(args []string, sendErr error) {
-	bin, err := exec.LookPath("notify-send")
-	if err != nil {
-		return
-	}
-	title, body := "Sent to phone", fmt.Sprintf("%d item(s) offered", countPaths(args))
-	if sendErr != nil {
-		title, body = "Could not send to phone", sendErr.Error()
-	}
-	_ = exec.Command(bin, "--app-name=sharing", title, body).Run()
-}
-
-// countPaths counts the paths in send's arguments (everything except --to and its value).
-func countPaths(args []string) int {
-	n := 0
-	for i := 0; i < len(args); i++ {
-		if args[i] == "--to" && i+1 < len(args) {
-			i++
-			continue
-		}
-		n++
-	}
-	return n
 }

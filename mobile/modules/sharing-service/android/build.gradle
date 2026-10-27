@@ -13,12 +13,21 @@ android {
     versionName "0.1.0"
   }
   lintOptions {
-    abortOnError false
+    // Real lint problems fail the build; the existing ones are recorded in lint-baseline.xml.
+    abortOnError true
+    baseline file('lint-baseline.xml')
+  }
+  testOptions {
+    unitTests.returnDefaultValues = true
   }
 }
 
 dependencies {
   implementation "com.squareup.okhttp3:okhttp:4.12.0"
-  implementation "androidx.documentfile:documentfile:1.0.1"
   implementation "org.apache.commons:commons-compress:1.27.1"
+
+  testImplementation "junit:junit:4.13.2"
+  testImplementation "com.squareup.okhttp3:mockwebserver:4.12.0"
+  // android.jar stubs throw "not mocked"; org.json is pulled in for the pure-Kotlin tests.
+  testImplementation "org.json:json:20231013"
 }

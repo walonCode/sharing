@@ -3,6 +3,7 @@ package config
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -19,13 +20,53 @@ type Settings struct {
 	Name       string `json:"name"`
 	ReceiveDir string `json:"receiveDir"`
 	Port       int    `json:"port"`
+
+	// Limits protect the laptop from a buggy or misbehaving paired peer.
+	// Keys missing from settings.json keep these defaults; an explicit 0 in
+	// MaxUploadBytes means "limited only by free disk space".
+	MaxUploadBytes int64 `json:"maxUploadBytes"`
+	MaxEntries     int   `json:"maxEntries"`
+	MaxTransfers   int   `json:"maxTransfersPerPeer"`
+	MinFreeBytes   int64 `json:"minFreeBytes"`
+	// MaxPartialBytes caps the declared size of one peer's unfinished uploads together.
+	MaxPartialBytes int64 `json:"maxPartialBytesPerPeer"`
+
+	// ConfirmPairing makes `sharingd pair` ask on the terminal before a phone is accepted.
+	ConfirmPairing bool `json:"confirmPairing"`
 }
+
+// Default limits.
+const (
+	DefaultMaxUploadBytes = 64 << 30
+	DefaultMaxEntries     = 200_000
+	DefaultMaxTransfers   = 4
+	DefaultMinFreeBytes   = 1 << 30
+	DefaultMaxPartial     = 256 << 30
+)
+
+// RotationGrace is how long a rotated-out device token keeps working.
+const RotationGrace = 60 * time.Second
 
 type Peer struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
 	TokenHash string    `json:"tokenHash"`
 	PairedAt  time.Time `json:"pairedAt"`
+	LastSeen  time.Time `json:"lastSeen,omitzero"`
+
+	// PrevTokenHash stays valid until PrevExpires after a token rotation.
+	PrevTokenHash string    `json:"prevTokenHash,omitempty"`
+	PrevExpires   time.Time `json:"prevExpires,omitzero"`
+}
+
+// Matches reports whether hash is this peer's current token hash, or the
+// previous one while its grace period lasts.
+func (p Peer) Matches(hash string, now time.Time) bool {
+	if subtle.ConstantTimeCompare([]byte(hash), []byte(p.TokenHash)) == 1 {
+		return true
+	}
+	return p.PrevTokenHash != "" && now.Before(p.PrevExpires) &&
+		subtle.ConstantTimeCompare([]byte(hash), []byte(p.PrevTokenHash)) == 1
 }
 
 // Store is safe for concurrent use.
@@ -35,6 +76,8 @@ type Store struct {
 	mu       sync.RWMutex
 	settings Settings
 	peers    map[string]Peer
+	byHash   map[string]string    // token hash (current or previous) -> peer id
+	lastSave map[string]time.Time // last time a peer's lastSeen reached disk
 }
 
 // DefaultDir returns ~/.config/sharing (honouring XDG_CONFIG_HOME).
@@ -51,7 +94,15 @@ func Open(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	s := &Store{dir: dir, peers: map[string]Peer{}}
+	s := &Store{dir: dir, peers: map[string]Peer{}, byHash: map[string]string{}, lastSave: map[string]time.Time{}}
+	s.settings = Settings{
+		MaxUploadBytes:  DefaultMaxUploadBytes,
+		MaxEntries:      DefaultMaxEntries,
+		MaxTransfers:    DefaultMaxTransfers,
+		MinFreeBytes:    DefaultMinFreeBytes,
+		MaxPartialBytes: DefaultMaxPartial,
+		ConfirmPairing:  true,
+	}
 
 	if err := readJSON(filepath.Join(dir, "settings.json"), &s.settings); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
@@ -59,12 +110,10 @@ func Open(dir string) (*Store, error) {
 		}
 		host, _ := os.Hostname()
 		home, _ := os.UserHomeDir()
-		s.settings = Settings{
-			DeviceID:   randomID(),
-			Name:       host,
-			ReceiveDir: filepath.Join(home, "Downloads", "Sharing"),
-			Port:       DefaultPort,
-		}
+		s.settings.DeviceID = randomID()
+		s.settings.Name = host
+		s.settings.ReceiveDir = filepath.Join(home, "Downloads", "Sharing")
+		s.settings.Port = DefaultPort
 		if err := s.saveSettings(); err != nil {
 			return nil, err
 		}
@@ -77,6 +126,7 @@ func Open(dir string) (*Store, error) {
 	for _, p := range peers {
 		s.peers[p.ID] = p
 	}
+	s.reindex()
 	return s, nil
 }
 
@@ -95,6 +145,30 @@ func (s *Store) UpdateSettings(fn func(*Settings)) error {
 	return s.saveSettings()
 }
 
+// reindex rebuilds the token-hash index. Callers hold s.mu for writing.
+func (s *Store) reindex() {
+	s.byHash = make(map[string]string, 2*len(s.peers))
+	for _, p := range s.peers {
+		s.byHash[p.TokenHash] = p.ID
+		if p.PrevTokenHash != "" {
+			s.byHash[p.PrevTokenHash] = p.ID
+		}
+	}
+}
+
+// PeerByTokenHash returns the peer whose current (or, during its grace
+// period, previous) token hash is hash. It is O(1) in the number of peers.
+func (s *Store) PeerByTokenHash(hash string, now time.Time) (Peer, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	id, ok := s.byHash[hash]
+	if !ok {
+		return Peer{}, false
+	}
+	p := s.peers[id]
+	return p, p.Matches(hash, now)
+}
+
 func (s *Store) Peers() []Peer {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -110,13 +184,48 @@ func (s *Store) AddPeer(p Peer) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.peers[p.ID] = p
+	s.reindex()
 	return s.savePeers()
 }
+
+// TouchPeer records that the peer was just seen. The timestamp is kept in
+// memory and written to disk at most once a minute per peer.
+func (s *Store) TouchPeer(id string, now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.peers[id]
+	if !ok {
+		return
+	}
+	p.LastSeen = now
+	s.peers[id] = p
+	if now.Sub(s.lastSave[id]) >= time.Minute {
+		s.lastSave[id] = now
+		_ = s.savePeers()
+	}
+}
+
+// RotatePeer replaces the peer's token hash; the old one keeps working for RotationGrace.
+func (s *Store) RotatePeer(id, newHash string, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p, ok := s.peers[id]
+	if !ok {
+		return ErrNoPeer
+	}
+	p.PrevTokenHash, p.PrevExpires, p.TokenHash = p.TokenHash, now.Add(RotationGrace), newHash
+	s.peers[id] = p
+	s.reindex()
+	return s.savePeers()
+}
+
+var ErrNoPeer = errors.New("no such peer")
 
 func (s *Store) RemovePeer(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.peers, id)
+	s.reindex()
 	return s.savePeers()
 }
 

@@ -1,45 +1,45 @@
 import { Redirect, router } from "expo-router";
 import { useEffect, useRef } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
+import { Button } from "../components/Button";
 import { SharingService, useSharingStatus } from "../lib/sharing";
+import { colors, spacing } from "../theme";
 
 export default function Home() {
   const status = useSharingStatus();
 
   // Android only asks for log access while this app is on screen. If automatic clipboard is on but the service has no
-  // access (it restarted in the background), restart it once per visit so the prompt appears.
-  const asked = useRef(false);
+  // access (it restarted in the background), restart it once per visit so the prompt appears. The native flags are read
+  // once on arrival, not on every status event.
+  const checked = useRef(false);
   useEffect(() => {
+    if (checked.current || !status.paired) return;
+    checked.current = true;
     const access = SharingService.clipboardAccess();
-    if (status.paired && access.enabled && access.overlay && access.logs && access.logActive === false && !asked.current) {
-      asked.current = true;
+    if (access.supported && access.enabled && access.overlay && access.logs && access.logActive === false) {
       SharingService.setAutoClipboard(true);
     }
-  }, [status]);
+  }, [status.paired]);
 
   if (!status.paired) return <Redirect href="/setup" />;
 
-  const state = status.connected
-    ? `Connected to ${status.laptopName}`
-    : status.running
-      ? "Looking for your laptop…"
-      : "Stopped";
+  const state = status.connected ? `Connected to ${status.laptopName}` : status.running ? "Looking for your laptop…" : "Stopped";
 
   return (
     <View style={styles.container}>
       <Text style={styles.state}>{state}</Text>
       {status.error ? <Text style={styles.error}>{status.error}</Text> : null}
-      <Text style={styles.hint}>Files from {status.laptopName} are saved in Downloads/{status.laptopName}.</Text>
       <Text style={styles.hint}>
-        You can close this app. Share from any app with “Send to laptop”, or use the “Send clipboard” quick-settings tile.
+        Files from {status.laptopName} are saved in Downloads/{status.laptopName}.
+      </Text>
+      <Text style={styles.hint}>
+        You can close this app. Share from any app with “Send to laptop”, or use the “Send clipboard” quick-settings tile. Transfers that
+        are interrupted resume by themselves; progress and failures show in the notification.
       </Text>
 
-      <Button
-        label={status.running ? "Stop" : "Start"}
-        onPress={() => (status.running ? SharingService.stop() : SharingService.start())}
-      />
+      <Button label={status.running ? "Stop" : "Start"} onPress={() => (status.running ? SharingService.stop() : SharingService.start())} />
       <Button label="Send a folder to laptop" onPress={() => SharingService.pickFolderToSend()} />
-      <Button label="Permissions and clipboard options" onPress={() => router.push("/setup")} />
+      <Button label="Permissions and clipboard options" onPress={() => router.push("/permissions")} />
       <Button
         label="Unpair"
         danger
@@ -52,20 +52,9 @@ export default function Home() {
   );
 }
 
-function Button({ label, onPress, danger }: { label: string; onPress: () => void; danger?: boolean }) {
-  return (
-    <Pressable onPress={onPress} style={[styles.button, danger && styles.danger]}>
-      <Text style={styles.buttonText}>{label}</Text>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 24, gap: 12 },
+  container: { flex: 1, padding: spacing.screen, gap: spacing.gap },
   state: { fontSize: 22, fontWeight: "600" },
-  error: { color: "#c0392b" },
-  hint: { color: "#666" },
-  button: { backgroundColor: "#208AEF", padding: 14, borderRadius: 10, alignItems: "center" },
-  danger: { backgroundColor: "#c0392b" },
-  buttonText: { color: "white", fontWeight: "600" },
+  error: { color: colors.danger },
+  hint: { color: colors.muted },
 });

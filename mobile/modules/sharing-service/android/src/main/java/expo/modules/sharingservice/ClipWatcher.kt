@@ -33,7 +33,9 @@ class ClipWatcher(private val ctx: Context, private val onText: (String) -> Unit
   private val main = Handler(Looper.getMainLooper())
   private val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
   private val wm = ctx.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+
   @Volatile private var logcat: Process? = null
+
   @Volatile private var stopped = false
   private var pending = false
 
@@ -50,7 +52,10 @@ class ClipWatcher(private val ctx: Context, private val onText: (String) -> Unit
       Log.w(TAG, "listener unavailable: $e")
     }
     if (hasReadLogs(ctx)) {
-      Thread(::watchLog, "sharing-clip-log").also { it.isDaemon = true; it.start() }
+      Thread(::watchLog, "sharing-clip-log").also {
+        it.isDaemon = true
+        it.start()
+      }
     } else {
       Log.i(TAG, "READ_LOGS not granted; only the change listener is active")
     }
@@ -58,7 +63,9 @@ class ClipWatcher(private val ctx: Context, private val onText: (String) -> Unit
 
   fun stop() {
     stopped = true
-    try { cm.removePrimaryClipChangedListener(listener) } catch (_: Exception) {}
+    try {
+      cm.removePrimaryClipChangedListener(listener)
+    } catch (_: Exception) {}
     logcat?.destroy()
     Status.logActive = null
   }
@@ -68,7 +75,10 @@ class ClipWatcher(private val ctx: Context, private val onText: (String) -> Unit
     main.post {
       if (pending) return@post
       pending = true
-      main.postDelayed({ pending = false; read() }, 150)
+      main.postDelayed({
+        pending = false
+        read()
+      }, 150)
     }
   }
 
@@ -81,12 +91,18 @@ class ClipWatcher(private val ctx: Context, private val onText: (String) -> Unit
       // Android logs constantly. If nothing from other apps shows up soon, the system has not granted log access
       // to this process (consent is per session and is only asked for while the app is in the foreground).
       main.postDelayed({
-        if (!stopped && Status.logActive == null) { Status.logActive = false; Status.changed() }
+        if (!stopped && Status.logActive == null) {
+          Status.logActive = false
+          Status.changed()
+        }
       }, 8_000)
       BufferedReader(InputStreamReader(p.inputStream)).use { r ->
         while (!stopped) {
           val line = r.readLine() ?: break
-          if (Status.logActive != true && !line.contains(TAG)) { Status.logActive = true; Status.changed() }
+          if (Status.logActive != true && !line.contains(TAG)) {
+            Status.logActive = true
+            Status.changed()
+          }
           if (isClipboardChange(line)) {
             Log.d(TAG, "log trigger: ${line.take(160)}")
             changed()
@@ -137,7 +153,9 @@ class ClipWatcher(private val ctx: Context, private val onText: (String) -> Unit
     fun finish() {
       if (done) return
       done = true
-      try { wm.removeViewImmediate(view) } catch (_: Exception) {}
+      try {
+        wm.removeViewImmediate(view)
+      } catch (_: Exception) {}
     }
     view = object : View(ctx) {
       override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
@@ -152,18 +170,24 @@ class ClipWatcher(private val ctx: Context, private val onText: (String) -> Unit
     val type = if (Build.VERSION.SDK_INT >= 26) {
       WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
     } else {
-      @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
+      @Suppress("DEPRECATION")
+      WindowManager.LayoutParams.TYPE_PHONE
     }
     // Focusable (no FLAG_NOT_FOCUSABLE) so it can take focus, but it ignores touches.
     val params = WindowManager.LayoutParams(
-      1, 1, type,
+      1,
+      1,
+      type,
       WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
       PixelFormat.TRANSLUCENT,
     )
     try {
       wm.addView(view, params)
       main.postDelayed({
-        if (!done) { Log.d(TAG, "overlay never got focus"); finish() }
+        if (!done) {
+          Log.d(TAG, "overlay never got focus")
+          finish()
+        }
       }, 1500)
     } catch (e: Exception) {
       Log.w(TAG, "overlay failed: $e")
@@ -173,7 +197,15 @@ class ClipWatcher(private val ctx: Context, private val onText: (String) -> Unit
   companion object {
     const val TAG = "SharingClip"
 
-    fun hasReadLogs(ctx: Context) =
-      ctx.checkSelfPermission("android.permission.READ_LOGS") == PackageManager.PERMISSION_GRANTED
+    fun hasReadLogs(ctx: Context) = ctx.checkSelfPermission("android.permission.READ_LOGS") == PackageManager.PERMISSION_GRANTED
+
+    /** Whether this build declares READ_LOGS at all (only the opt-in automatic-clipboard build does). */
+    @Suppress("DEPRECATION")
+    fun isDeclared(ctx: Context): Boolean = try {
+      val info = ctx.packageManager.getPackageInfo(ctx.packageName, PackageManager.GET_PERMISSIONS)
+      info.requestedPermissions?.contains("android.permission.READ_LOGS") == true
+    } catch (_: Exception) {
+      false
+    }
   }
 }

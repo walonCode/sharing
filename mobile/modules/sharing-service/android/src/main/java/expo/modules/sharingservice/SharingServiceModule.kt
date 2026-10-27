@@ -58,7 +58,11 @@ class SharingServiceModule : Module() {
 
     AsyncFunction("unpair") {
       SharingService.stop(ctx)
-      Prefs(ctx).apply { clearPairing(); enabled = false }
+      Prefs(ctx).apply {
+        Net.shutdown(fingerprint)
+        clearPairing()
+        enabled = false
+      }
       Status.changed()
       status()
     }
@@ -95,6 +99,8 @@ class SharingServiceModule : Module() {
         "enabled" to Prefs(ctx).autoClipboard,
         "overlay" to Settings.canDrawOverlays(ctx),
         "logs" to ClipWatcher.hasReadLogs(ctx),
+        // False in the default build, which does not declare READ_LOGS or the overlay permission at all.
+        "supported" to ClipWatcher.isDeclared(ctx),
         "logActive" to Status.logActive,
       )
     }

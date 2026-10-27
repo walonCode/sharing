@@ -62,7 +62,10 @@ func (s *Store) Certificate() (tls.Certificate, error) {
 }
 
 // Fingerprint is the hex SHA-256 of the leaf certificate.
-func Fingerprint(cert tls.Certificate) string {
-	sum := sha256.Sum256(cert.Certificate[0])
+func Fingerprint(cert tls.Certificate) string { return FingerprintDER(cert.Certificate[0]) }
+
+// FingerprintDER is the SHA-256 fingerprint of a DER certificate, as pinned by the phone.
+func FingerprintDER(der []byte) string {
+	sum := sha256.Sum256(der)
 	return hex.EncodeToString(sum[:])
 }

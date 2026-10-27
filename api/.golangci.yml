@@ -1,0 +1,17 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - unused
+  exclusions:
+    rules:
+      # Closing a reader or removing a temp file on the way out has nothing useful to report.
+      - linters: [errcheck]
+        text: "Close|Remove|RemoveAll|Shutdown|Fprint"
+formatters:
+  enable:
+    - goimports

@@ -16,20 +16,32 @@ ABIS ?= arm64-v8a
 GO_LDFLAGS := -s -w
 
 .DEFAULT_GOAL := help
-.PHONY: apk-quick help test test-api test-mobile daemon service setup daemon-uninstall apk phone logs clean
+.PHONY: apk-quick apk-auto-clipboard help test test-api test-mobile lint lint-api lint-mobile daemon service setup daemon-uninstall apk phone logs clean bench
 
 help: ## Show this help
 	@awk 'BEGIN{FS=":.*## "} /^[a-zA-Z_-]+:.*## /{printf "  \033[1m%-18s\033[0m %s\n",$$1,$$2}' $(MAKEFILE_LIST)
 
 ## ---- checks ----
 
-test: test-api test-mobile ## Run every check
+test: test-api test-mobile ## Run every check (use `make lint` for style checks)
 
 test-api: ## go vet + go test -race
 	cd api && go vet ./... && go test -race ./...
 
 test-mobile: ## typecheck, lint, unit tests
 	cd mobile && bunx tsc --noEmit && bunx expo lint && bun test src
+
+lint: lint-api lint-mobile ## golangci-lint, ktlint and prettier
+
+lint-api: ## golangci-lint (govet, staticcheck, errcheck, ineffassign, unused, goimports)
+	cd api && golangci-lint run ./...
+
+lint-mobile: ## prettier --check and ktlint (needs the ktlint CLI on PATH)
+	cd mobile && bun run format:check
+	cd mobile/modules/sharing-service/android && ktlint "src/**/*.kt"
+
+bench: ## Go benchmarks (auth lookup, transfers, clipboard)
+	cd api && go test ./internal/server ./internal/transfer ./internal/clipboard -run '^$$' -bench . -benchtime 3x
 
 ## ---- laptop ----
 
@@ -62,6 +74,9 @@ apk: ## Build the minified release APK into dist/sharing.apk
 	@mkdir -p $(DIST)
 	cp mobile/android/app/build/outputs/apk/release/app-release.apk $(APK)
 	@ls -lh $(APK)
+
+apk-auto-clipboard: ## Like `apk`, but declares READ_LOGS and SYSTEM_ALERT_WINDOW for the optional automatic clipboard
+	SHARING_AUTO_CLIPBOARD=1 $(MAKE) apk
 
 apk-quick: ## Rebuild the APK reusing mobile/android (fast; use after JS-only changes)
 	cd mobile/android && ./gradlew assembleRelease -PreactNativeArchitectures=$(ABIS)

@@ -7,6 +7,8 @@ export type ClipboardAccess = {
   overlay: boolean;
   /** READ_LOGS was granted over adb. */
   logs: boolean;
+  /** This build declares the permissions at all. False in the default build (`make apk-auto-clipboard` adds them). */
+  supported: boolean;
   /** Android is letting the service read the log right now (null = still checking). When false, open the app to be asked. */
   logActive: boolean | null;
 };

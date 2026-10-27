@@ -1,1 +1,5 @@
 /dist
+
+# Gradle output of the local module
+mobile/modules/sharing-service/android/build/
+mobile/modules/sharing-service/android/.cxx/

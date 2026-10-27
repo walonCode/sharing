@@ -145,3 +145,52 @@ All step 16 targets met or explicitly revised with a reason in this file; `go ve
 3. **Formatter for TypeScript and Kotlin** (Prettier or Biome; ktlint's format): adopting one means a single large formatting-only commit.
 4. **`ClipWatcher` log filtering.** Worth the risk only if the measured battery cost is real; it touches the fragile OEM-specific detection that currently works on the user's Samsung phone.
 5. **Linter strictness** for Go (`golangci-lint` default set versus a stricter set including `gofumpt` and `revive`): recommended default set plus `goimports`, tightening later.
+
+
+## Implementation notes
+
+### Measurements (Linux x86-64 sandbox, 4 vCPU; `make bench` reproduces the Go ones)
+
+| Item | Before | After | Kept |
+| --- | --- | --- | --- |
+| Auth lookup, 100 peers | 9.8 us, 15 KB, 7 allocs | 1.0 us, 0.7 KB, 6 allocs | yes (flat in the number of peers) |
+| Auth lookup, 1 and 10 peers | 1.2 and 1.9 us | 1.1 us | yes |
+| One clipboard read through an external tool | 1.3 ms, 115 allocs (fork and exec) | unchanged per read | reads now only happen on a change event |
+| Reading a 200 MB clipboard | 655 ms, 747 MB allocated | 5 ms, 3.3 MB (capped at 1 MiB + 1 and the tool is stopped) | yes |
+| Idle clipboard process spawns | 2.5 per second | Wayland with `wl-paste --watch`: 0 while idle; X11 or fallback: 2.5 per second for 30 s after a change, then 0.5 per second | yes |
+| `SaveFile` 256 MiB from memory | 3.0 to 3.3 GB/s | 256 KiB copy buffer: 2.2 to 3.4 GB/s (noise) | no, no measurable gain |
+| Clip JSON encode, 4 KiB and 1 MiB | 7 us and 1.7 ms per peer | not changed | no: marshal-once would save about 7 us per copy with one phone |
+| `Pack`, `Unpack`, `BuildManifest`, 10 000 small files | 218 ms, 723 ms, 35 ms | unchanged | recorded as the baseline |
+| Upload 256 MiB over loopback TLS | HTTP/1.1: 144 and 133 MB/s | h2 (OkHttp default): 289 and 189 MB/s | h2 kept; loopback only, so it says nothing about WiFi |
+| `sharingd` binary (`-trimpath -s -w`) | 9.1 MB | 9.9 MB | grew with the resumable features; module graph unchanged at 15 |
+| Direct npm dependencies | 25 | 12 (and prettier as a dev dependency) | yes |
+| Expo modules autolinked on Android | 20 | 15 | yes; the APK size was not measured |
+
+The spawn rates in the table are computed from the code (400 ms and 2 s intervals), not measured with `strace`: no clipboard tool or desktop session exists in the sandbox.
+
+Targets that could only be assessed on hardware or with the Android SDK were not measured: APK size (baseline 40 MB, target 25 MB), phone idle drain with the laptop off, cold start, service memory, throughput as a fraction of `iperf3`. The discovery change that should reduce idle drain (mDNS only when the last address fails, backoff up to 5 minutes, reset on network change) is in place but not measured.
+
+### Done
+
+- **Step 16.** Go benchmarks (`server`, `transfer`, `clipboard`) and the table above. The phone-side and throughput items need a device.
+- **Step 17.** `.golangci.yml`, `.editorconfig` for ktlint, prettier for TypeScript (one formatting pass, only five files changed), `make lint` and `make bench`, CI wiring, CLI tests (the `call` helper, argument parsing, the confirmation flow, `doctor` checks), coverage reported in CI. The one `staticcheck` finding of the baseline was removed by rewriting the CLI.
+- **Step 18.** Event-driven clipboard with an adaptive fallback and capped reads; hash-indexed auth; `Registry` expiry is lazy on lookup plus a one-minute sweep; `main.go` split into `run.go`, `cli.go`, `doctor.go`, `notify.go`; one `call` helper and a `flag.FlagSet` per subcommand (flags may appear anywhere); `control.API` with a method per route; `log/slog`; stale comments fixed; `sharingd doctor` is now the user of `discovery.Browse`. Settings: a changed name still needs a restart for mDNS, and `setup` says so.
+- **Step 19 (Android).** One OkHttp client per fingerprint with a bounded dispatcher, shut down on unpair; discovery only when the last address fails, backoff capped at 5 minutes and reset by network change, Start or a share; 256 KiB copy buffers everywhere; two queue workers instead of a cached thread pool; SAF listing with one `DocumentsContract` cursor per directory; grouped and progress notifications; `Connection` split into `Session`, `Transfers`, `ClipSync` with a single `Prefs`; `WAKE_LOCK`, `ACCESS_WIFI_STATE` and `CHANGE_WIFI_STATE` removed (by static analysis: nothing in the code uses them; not yet confirmed on a phone); Android lint set to fail on errors with a baseline file.
+- **Step 20 (mobile).** Unused dependencies removed in two batches, each checked with tsc, lint, tests, a Metro bundle and `expo-doctor` (its two network checks could not run offline); iOS and web configuration, `reset-project`, `expo.icon` and the favicon removed; `setup` split into a pairing screen and a permissions screen with `usePermissions` and `useClipboardAccess`; `Button`, `Step` and a small theme in `src/components` and `src/theme.ts`; the native clipboard flags are read once per visit; `CLAUDE.md` and `AGENTS.md` corrected.
+
+### Decisions taken
+
+1. iOS and web dropped.
+2. QR scanning kept (CameraX and ML Kit stay), because their share of the APK could not be measured here.
+3. Prettier for TypeScript, ktlint for Kotlin (the `intellij_idea` style with two-space indents, matching the existing code).
+4. `ClipWatcher` log filtering not changed.
+5. golangci-lint default-sized set (govet, staticcheck, errcheck, ineffassign, unused) plus goimports.
+
+### Not done, and why
+
+- **ProGuard keep rules were not narrowed.** R8 problems appear only in a release build that has to pair, scan and share on a phone; none of that can be exercised here, and a wrong rule breaks the app silently.
+- **`ClipWatcher` server-side log filtering** needs the measured battery cost first and the user's Samsung phone; it stays as it is.
+- **Marshal-once broadcast and a shared copy-buffer pool** were measured and rejected (see the table).
+- **Batching MediaStore inserts** for a received folder: each file is still inserted, written and published separately. Without a device there is no number to compare, and MediaStore offers no batch insert that keeps per-file pending state.
+- **Rtnetlink instead of interface polling for mDNS**: no wakeup measurement, so not touched.
+- **The plan 3 device matrix** after the Android refactor has not been run.

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseInvite } from "./invite";
+import { fingerprintPreview, parseInvite } from "./invite";
 
 const fp = "ab".repeat(32);
 const link = `sharing://pair?fp=${fp}&host=192.168.1.5&name=my+laptop&port=53317&token=abc_DEF-123`;
@@ -36,5 +36,15 @@ describe("parseInvite", () => {
     ["empty", ""],
   ])("rejects %s", (_name, value) => {
     expect(parseInvite(value)).toBeNull();
+  });
+});
+
+describe("fingerprintPreview", () => {
+  test("groups the first 16 hex digits in fours", () => {
+    expect(fingerprintPreview("0123456789abcdef" + "0".repeat(48))).toBe("0123 4567 89ab cdef");
+  });
+  test("copes with a short value", () => {
+    expect(fingerprintPreview("abc")).toBe("abc");
+    expect(fingerprintPreview("")).toBe("");
   });
 });
