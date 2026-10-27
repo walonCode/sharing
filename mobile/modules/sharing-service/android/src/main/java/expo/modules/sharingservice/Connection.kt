@@ -1,221 +1,171 @@
 package expo.modules.sharingservice
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
-import android.net.ConnectivityManager
-import android.net.Network
 import android.net.Uri
-import android.os.Build
-import android.os.Handler
-import android.os.Looper
-import android.provider.OpenableColumns
-import androidx.documentfile.provider.DocumentFile
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody
-import okhttp3.WebSocket
-import okhttp3.WebSocketListener
-import okio.BufferedSink
 import org.json.JSONObject
-import java.net.URLEncoder
-import java.util.concurrent.CountDownLatch
+import java.io.IOException
 import java.util.concurrent.Executors
 
 /**
- * Keeps one authenticated websocket to the laptop alive forever: finds the
- * laptop (last address, then mDNS), connects, reconnects with backoff, and
- * reacts to network changes. Also performs uploads and downloads.
+ * Owns the pieces that talk to the laptop - the [Session] (websocket and
+ * reconnect), the [Transfers] queue and [ClipSync] - and routes messages between
+ * them. The service only starts and stops this object.
  */
-class Connection(private val ctx: Context, private val notifier: Notifier) {
-  private val prefs = Prefs(ctx)
-  private val discovery = Discovery(ctx)
-  private val io = Executors.newCachedThreadPool()
-  private val main = Handler(Looper.getMainLooper())
-  private val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-  private val wake = Object()
-
-  @Volatile private var stopped = false
-  @Volatile private var ws: WebSocket? = null
-  @Volatile private var client: OkHttpClient? = null
-  @Volatile private var base: String? = null // e.g. https://192.168.1.5:53317
-  @Volatile private var lastClip = ""
-  @Volatile private var lastClipTs = 0L
-  private var thread: Thread? = null
+class Connection(private val ctx: Context, private val prefs: Prefs, private val notifier: Notifier) : Session.Listener {
+  private val store = SqliteTransferStore(ctx)
+  private val spool = Spool(ctx, prefs.spoolThreshold)
+  private val sources = AndroidSources(ctx, spool)
+  private val misc = Executors.newSingleThreadExecutor { r -> Thread(r, "sharing-misc").also { it.isDaemon = true } }
+  private val session = Session(ctx, prefs, this)
+  private val clip = ClipSync(ctx) { session.send(it) }
   private var watcher: ClipWatcher? = null
+  private var lastProgressSent = 0L
 
-  private val cm = ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-  private val netCallback = object : ConnectivityManager.NetworkCallback() {
-    override fun onAvailable(network: Network) = poke()
+  private val events = object : TransferEvents {
+    override fun progress(t: Transfer, bytes: Long) {
+      transfers.checkCancelled(t.id)
+      notifier.progress(t, bytes)
+      val now = System.currentTimeMillis()
+      if (t.direction == Dir.DOWN && now - lastProgressSent > 3_000) {
+        lastProgressSent = now
+        session.send(JSONObject().put("type", "progress").put("id", t.source).put("offset", bytes).toString())
+      }
+    }
+    override fun changed(t: Transfer) = notifier.changed(t)
+    override fun authFailed() { Status.lastError = "Laptop no longer trusts this phone; pair again"; Status.changed(); notifier.authFailed() }
+  }
+
+  private val transfers: Transfers = Transfers(
+    store = store,
+    attemptUp = { uploader.attempt(it) },
+    attemptDown = { downloader.attempt(it) },
+    discardDown = { downloader.discard(it) },
+    events = events,
+    remote = ::remote,
+  )
+
+  private val uploader = Uploader(
+    remote = ::remote, store = store, sources = sources,
+    onProgress = { t, b -> events.progress(t, b) },
+    legacy = { prefs.peerProto < 2 },
+    setLegacy = { prefs.peerProto = 1 },
+  )
+
+  private val downloader = Downloader(
+    remote = ::remote, store = store, sink = { MediaStoreSink(ctx, prefs.laptopName ?: "laptop") },
+    onProgress = { t, b -> events.progress(t, b) },
+    legacyDir = ::legacyDirDownload,
+  )
+
+  init {
+    transfers.onSpoolCleanup { spool.delete(it.id) }
+  }
+
+  /** A client for the laptop's current address, or null before the first successful connection. */
+  private fun remote(): Remote? {
+    val fp = prefs.fingerprint ?: return null
+    val target = session.target() ?: return null
+    return Remote(Net.client(fp), target, token = { prefs.peerToken })
   }
 
   fun start() {
-    stopped = false
     if (prefs.autoClipboard) watcher = ClipWatcher(ctx) { sendClip(it) }.also { it.start() }
-    cm.registerDefaultNetworkCallback(netCallback)
-    thread = Thread(::loop, "sharing-connection").also { it.isDaemon = true; it.start() }
+    transfers.start()
+    session.start()
+    spool.sweep(store.all().map { it.id }.toSet())
   }
 
   fun stop() {
-    stopped = true
     watcher?.stop()
-    try { cm.unregisterNetworkCallback(netCallback) } catch (_: Exception) {}
-    ws?.cancel()
-    poke()
-    io.shutdownNow()
+    session.stop()
+    transfers.stop()
+    misc.shutdownNow()
   }
 
-  private fun poke() = synchronized(wake) { wake.notifyAll() }
+  /** The user pressed Start or shared something: look for the laptop now. */
+  fun poke() { session.poke(); transfers.retryNow() }
 
-  private fun sleep(ms: Long) = synchronized(wake) { if (!stopped) wake.wait(ms) }
+  // ---- session events ----
 
-  private fun loop() {
-    var backoff = 1_000L
-    while (!stopped) {
-      val fp = prefs.fingerprint
-      val token = prefs.peerToken
-      val laptopId = prefs.laptopId
-      if (fp == null || token == null || laptopId == null) { sleep(5_000); continue }
-      client = Net.client(fp)
+  override fun onHello(proto: Int) {}
 
-      val candidates = buildList {
-        prefs.lastHost?.let { add(it to prefs.lastPort) }
-        discovery.find(laptopId, 8_000)?.let { if (it !in this) add(it) }
-      }
-      var connectedOnce = false
-      for ((host, port) in candidates) {
-        if (stopped) return
-        if (session(host, port, token)) { connectedOnce = true; break }
-      }
-      if (connectedOnce) backoff = 1_000L else backoff = (backoff * 2).coerceAtMost(30_000L)
-      Status.connected = false
-      Status.changed()
-      sleep(backoff)
-    }
+  override fun onConnected() {
+    clip.onConnected()
+    transfers.retryNow()
   }
 
-  private fun hostPart(host: String) = if (host.contains(':')) "[${host.substringBefore('%')}]" else host
+  override fun onNetwork() = transfers.retryNow()
 
-  /** Runs one websocket session; returns true if it ever opened. */
-  private fun session(host: String, port: Int, token: String): Boolean {
-    val url = "https://${hostPart(host)}:$port"
-    val req = Request.Builder().url("$url/ws").header("Authorization", "Bearer $token").build()
-    val closed = CountDownLatch(1)
-    var opened = false
-    ws = client!!.newWebSocket(req, object : WebSocketListener() {
-      override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
-        opened = true
-        base = url
-        prefs.lastHost = host
-        prefs.lastPort = port
-        Status.connected = true
-        Status.lastError = null
-        Status.changed()
-      }
-      override fun onMessage(webSocket: WebSocket, text: String) = handle(JSONObject(text))
-      override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = closed.countDown()
-      override fun onFailure(webSocket: WebSocket, t: Throwable, response: okhttp3.Response?) {
-        if (response?.code == 401) { Status.lastError = "Laptop no longer trusts this phone; pair again"; Status.changed() }
-        closed.countDown()
-      }
-    })
-    closed.await()
-    base = null
-    return opened
-  }
-
-  // ---- incoming ----
-
-  private fun handle(m: JSONObject) {
+  override fun onMessage(m: JSONObject) {
     when (m.optString("type")) {
-      "offer" -> io.execute { download(m.getString("id"), m.getString("kind"), m.optString("name", "file")) }
-      "clip" -> applyClip(m.optString("data"), m.optLong("ts"))
-    }
-  }
-
-  private fun applyClip(data: String, ts: Long) {
-    if (data.isEmpty() || data == lastClip || ts < lastClipTs) return
-    lastClip = data
-    lastClipTs = ts
-    main.post { clipboard.setPrimaryClip(ClipData.newPlainText("sharing", data)) }
-  }
-
-  private fun download(id: String, kind: String, name: String) {
-    val b = base ?: return
-    try {
-      if (Build.VERSION.SDK_INT < 29) error("Android 10 or newer is required to receive files")
-      val laptop = prefs.laptopName ?: "laptop"
-      val req = Request.Builder().url("$b/transfer/$id").header("Authorization", "Bearer ${prefs.peerToken}").build()
-      client!!.newCall(req).execute().use { resp ->
-        if (!resp.isSuccessful) error("Laptop refused the transfer (${resp.code})")
-        val body = resp.body!!.byteStream()
-        val saved = if (kind == "dir") Storage.untar(ctx, laptop, name, body) else Storage.saveFile(ctx, laptop, name, body)
-        notifier.transfer("Received", saved)
-      }
-    } catch (e: Exception) {
-      notifier.transfer("Receive failed", "$name: ${e.message}")
+      "offer" -> transfers.onOffer(m.getString("id"), m.optString("kind", "file"), m.optString("name", "file"), m.optLong("size", -1))
+      "clip" -> clip.onRemote(m.optString("data"), m.optLong("ts"))
+      "cancel" -> transfers.onLaptopCancel(m.optString("id"))
+      "token" -> m.optString("token").takeIf { it.isNotEmpty() }?.let { prefs.peerToken = it } // rotated by `sharingd rotate`
     }
   }
 
   // ---- outgoing ----
 
-  fun sendClip(text: String) {
-    if (text.isEmpty() || text == lastClip) return
-    lastClip = text
-    lastClipTs = System.currentTimeMillis()
-    val msg = JSONObject().put("type", "clip").put("mime", "text/plain").put("data", text).put("ts", lastClipTs)
-    ws?.send(msg.toString())
+  fun sendClip(text: String) = clip.sendLocal(text)
+
+  fun cancel(id: String) = transfers.cancel(id)
+  fun retry(id: String) = transfers.retry(id)
+
+  /**
+   * Queues shared items. Unsafe URIs are refused, small files are copied to the
+   * spool (the share grant dies with the process), and the work waits [UNDO_MS] so
+   * the user can undo an accidental share from the notification.
+   */
+  fun uploadUris(uris: List<Uri>) {
+    val laptop = prefs.laptopName ?: "your laptop"
+    val dirs = listOfNotNull(ctx.filesDir.parent, ctx.dataDir?.path, ctx.cacheDir.parent, ctx.noBackupFilesDir.parent, ctx.getExternalFilesDir(null)?.parent)
+    val authorities = setOf(ctx.packageName, "${ctx.packageName}.fileprovider", "${ctx.packageName}.provider")
+    val queued = ArrayList<String>()
+    val notBefore = System.currentTimeMillis() + UNDO_MS
+    for (uri in uris) {
+      val refusal = UriPolicy.reject(uri.toString(), authorities, dirs)
+      if (refusal != null) { notifier.transfer("Not sent", refusal); continue }
+      val meta = queryMeta(ctx.contentResolver, uri)
+      val row = Transfer(direction = Dir.UP, name = Names.sanitize(meta.name), kind = "file", source = uri.toString(), size = meta.size, nextRetryAt = notBefore)
+      spool.threshold = prefs.spoolThreshold
+      val spooled = spool.copyIfSmall(ctx.contentResolver, uri, row.id, meta.size)
+      val saved = if (spooled) row.copy(extra = JSONObject().put("spooled", true)) else row
+      transfers.enqueue(saved)
+      queued.add(row.id)
+    }
+    if (queued.isNotEmpty()) { notifier.undoable(queued.size, laptop, queued); session.poke(false) }
   }
 
-  private fun uploadTarget(): String? = base ?: prefs.lastHost?.let { "https://${hostPart(it)}:${prefs.lastPort}" }
-
-  fun uploadUris(uris: List<Uri>) = uris.forEach { uri -> io.execute { uploadUri(uri) } }
-
-  fun uploadTree(tree: Uri) = io.execute {
-    val folder = DocumentFile.fromTreeUri(ctx, tree)
-    if (folder == null) { notifier.transfer("Send failed", "Folder not readable"); return@execute }
-    val name = folder.name ?: "folder"
-    val body = object : RequestBody() {
-      override fun contentType() = "application/x-tar".toMediaType()
-      override fun writeTo(sink: BufferedSink) = Storage.tarTree(folder, ctx, sink.outputStream())
-    }
-    put("name=${enc(name)}&kind=dir", body, name)
+  fun uploadTree(tree: Uri) {
+    val name = Names.sanitize(Storage.treeName(ctx, tree))
+    val row = Transfer(direction = Dir.UP, name = name, kind = "dir", source = tree.toString(), nextRetryAt = System.currentTimeMillis() + UNDO_MS)
+    transfers.enqueue(row)
+    notifier.undoable(1, prefs.laptopName ?: "your laptop", listOf(row.id))
+    session.poke(false)
   }
 
-  private fun uploadUri(uri: Uri) {
-    var name = "shared-file"
-    var size = -1L
-    ctx.contentResolver.query(uri, null, null, null, null)?.use { c ->
-      if (c.moveToFirst()) {
-        c.getColumnIndex(OpenableColumns.DISPLAY_NAME).takeIf { it >= 0 }?.let { name = c.getString(it) }
-        c.getColumnIndex(OpenableColumns.SIZE).takeIf { it >= 0 && !c.isNull(it) }?.let { size = c.getLong(it) }
+  // ---- revision 1 laptops ----
+
+  /** Folder download from a laptop without manifests: one live tar, no resume. */
+  private fun legacyDirDownload(t: Transfer): Outcome {
+    val r = remote() ?: return Outcome(error = IOException("laptop not reachable"), unreachable = true)
+    val opened = r.open("/transfer/${t.source}", 0, null)
+    return opened.use {
+      if (!it.outcome.ok) return@use it.outcome
+      try {
+        Storage.untar(ctx, prefs.laptopName ?: "laptop", t.name, it.stream())
+        Outcome(status = 200, progress = true)
+      } catch (e: IOException) {
+        Outcome(error = e)
+      } catch (e: IllegalArgumentException) {
+        Outcome(status = 422)
       }
     }
-    val type = (ctx.contentResolver.getType(uri) ?: "application/octet-stream").toMediaType()
-    val body = object : RequestBody() {
-      override fun contentType() = type
-      override fun contentLength() = size
-      override fun writeTo(sink: BufferedSink) {
-        ctx.contentResolver.openInputStream(uri)!!.use { sink.outputStream().let { out -> it.copyTo(out) } }
-      }
-    }
-    put("name=${enc(name)}&kind=file", body, name)
   }
 
-  private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
-
-  private fun put(query: String, body: RequestBody, label: String) {
-    val url = uploadTarget()
-    val c = client ?: prefs.fingerprint?.let { Net.client(it).also { n -> client = n } }
-    if (url == null || c == null) { notifier.transfer("Send failed", "$label: laptop not reachable"); return }
-    try {
-      val req = Request.Builder().url("$url/upload?$query").header("Authorization", "Bearer ${prefs.peerToken}").put(body).build()
-      c.newCall(req).execute().use { resp ->
-        if (resp.isSuccessful) notifier.transfer("Sent", label) else notifier.transfer("Send failed", "$label (${resp.code})")
-      }
-    } catch (e: Exception) {
-      notifier.transfer("Send failed", "$label: ${e.message}")
-    }
+  companion object {
+    /** How long an accidental share can be undone before the upload starts. */
+    const val UNDO_MS = 5_000L
   }
 }

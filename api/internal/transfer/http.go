@@ -56,6 +56,7 @@ func Mount(srv *server.Server) *Service {
 
 	srv.Handle("GET /transfer/{id}", http.HandlerFunc(s.handleDownload))
 	srv.Handle("DELETE /transfer/{id}", http.HandlerFunc(s.handleOfferDelete))
+	srv.Handle("POST /transfer/{id}/ack", http.HandlerFunc(s.handleAck))
 	srv.Handle("GET /transfer/{id}/manifest", http.HandlerFunc(s.handleManifest))
 	srv.Handle("GET /transfer/{id}/files/{n}", http.HandlerFunc(s.handleEntry))
 	srv.Handle("GET /transfer/{id}/sha256", http.HandlerFunc(s.handleSum))
@@ -478,6 +479,32 @@ func (s *Service) handleOfferDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.finish(o.ID, protocol.StatusCancelled, "")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleAck lets the phone finish an offer over HTTP, so the result is not lost
+// when the websocket happens to be down at the end of a download.
+func (s *Service) handleAck(w http.ResponseWriter, r *http.Request) {
+	o, ok := s.Registry.Get(r.PathValue("id"), server.PeerFrom(r.Context()).ID)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	var body struct {
+		Status string `json:"status"`
+		Error  string `json:"error"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	switch body.Status {
+	case protocol.StatusOK, protocol.StatusFailed, protocol.StatusCancelled:
+	default:
+		http.Error(w, "bad status", http.StatusBadRequest)
+		return
+	}
+	s.finish(o.ID, body.Status, body.Error)
 	w.WriteHeader(http.StatusNoContent)
 }
 

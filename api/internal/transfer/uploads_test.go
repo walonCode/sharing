@@ -119,15 +119,8 @@ func TestUploadResumesAfterConnectionKilledMidPatch(t *testing.T) {
 	if off != 5 {
 		t.Fatalf("server stored %d bytes, want the 5 that arrived", off)
 	}
-	// The first handler may still be draining; 423 tells the client to back off and retry.
-	var r *http.Response
-	var body string
-	for range 100 {
-		if r, body = e.patch(t, c.ID, off, "fghijkl"); r.StatusCode != http.StatusLocked {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	// The first handler may still be noticing the dead connection; the request waits briefly for it.
+	r, body := e.patch(t, c.ID, off, "fghijkl")
 	if r.StatusCode != http.StatusCreated {
 		t.Fatalf("resume = %d %s", r.StatusCode, body)
 	}
@@ -171,6 +164,9 @@ func TestDuplicateFinalPatchDoesNotDuplicateTheFile(t *testing.T) {
 }
 
 func TestTwoConcurrentPatchesGet423(t *testing.T) {
+	old := busyWait
+	busyWait = 100 * time.Millisecond
+	defer func() { busyWait = old }()
 	e := setup(t)
 	_, c := e.create(t, `{"name":"slow.bin","size":10}`)
 	pr, pw := io.Pipe()

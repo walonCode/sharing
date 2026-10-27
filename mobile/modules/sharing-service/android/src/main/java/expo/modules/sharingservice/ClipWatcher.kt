@@ -175,5 +175,12 @@ class ClipWatcher(private val ctx: Context, private val onText: (String) -> Unit
 
     fun hasReadLogs(ctx: Context) =
       ctx.checkSelfPermission("android.permission.READ_LOGS") == PackageManager.PERMISSION_GRANTED
+
+    /** Whether this build declares READ_LOGS at all (only the opt-in automatic-clipboard build does). */
+    @Suppress("DEPRECATION")
+    fun isDeclared(ctx: Context): Boolean = try {
+      val info = ctx.packageManager.getPackageInfo(ctx.packageName, PackageManager.GET_PERMISSIONS)
+      info.requestedPermissions?.contains("android.permission.READ_LOGS") == true
+    } catch (_: Exception) { false }
   }
 }

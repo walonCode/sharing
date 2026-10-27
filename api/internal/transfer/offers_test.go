@@ -490,3 +490,28 @@ func TestTransferListCoversBothDirectionsAndControlActions(t *testing.T) {
 		t.Fatal("unknown id must error")
 	}
 }
+
+func TestAckOverHTTP(t *testing.T) {
+	e := setup(t)
+	o, _ := e.offerFile(t, "abc")
+	if resp, _ := e.doH(t, "POST", "/transfer/"+o.ID+"/ack", s(`{"status":"bogus"}`), hdr()); resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bad status = %d", resp.StatusCode)
+	}
+	_, tok := e.otherPeer(t)
+	if resp, _ := e.doAs(t, tok, "POST", "/transfer/"+o.ID+"/ack", s(`{"status":"ok"}`), hdr()); resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("another peer's ack = %d", resp.StatusCode)
+	}
+	if resp, _ := e.doH(t, "POST", "/transfer/"+o.ID+"/ack", s(`{"status":"failed","error":"disk full"}`), hdr()); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("ack = %d", resp.StatusCode)
+	}
+	if c, _ := e.svc.Registry.Get(o.ID, ""); c.State != StateFailed || c.Error != "disk full" {
+		t.Fatalf("offer = %+v", c)
+	}
+	// Acking an already finished offer is harmless (the phone may repeat it).
+	if resp, _ := e.doH(t, "POST", "/transfer/"+o.ID+"/ack", s(`{"status":"ok"}`), hdr()); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("repeat ack = %d", resp.StatusCode)
+	}
+	if c, _ := e.svc.Registry.Get(o.ID, ""); c.State != StateFailed {
+		t.Fatal("a finished offer must not change state")
+	}
+}

@@ -358,15 +358,27 @@ func (u *Uploads) Offset(up *Upload) int64 {
 	return info.Size()
 }
 
-// acquire claims the session for one writer.
+// busyWait is how long a second request waits for the first writer to let go
+// before getting 423. A client that retries right after its connection died
+// otherwise races the handler that is still noticing the dead connection.
+var busyWait = 2 * time.Second
+
+// acquire claims the session for one writer, waiting up to busyWait for a previous one.
 func (u *Uploads) acquire(up *Upload) error {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	if up.busy {
-		return ErrUploadBusy
+	deadline := time.Now().Add(busyWait)
+	for {
+		u.mu.Lock()
+		if !up.busy {
+			up.busy = true
+			u.mu.Unlock()
+			return nil
+		}
+		u.mu.Unlock()
+		if time.Now().After(deadline) {
+			return ErrUploadBusy
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
-	up.busy = true
-	return nil
 }
 
 func (u *Uploads) release(up *Upload) {
