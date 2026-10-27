@@ -31,7 +31,9 @@ class Spool(ctx: Context, var threshold: Long = DEFAULT_THRESHOLD) {
     }
   }
 
-  fun delete(id: String) { File(dir, id).delete() }
+  fun delete(id: String) {
+    File(dir, id).delete()
+  }
 
   /** Removes spooled files whose queue row is gone. */
   fun sweep(liveIds: Set<String>) {

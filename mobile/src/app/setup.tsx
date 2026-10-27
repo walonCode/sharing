@@ -2,72 +2,62 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Device from "expo-device";
 import { router } from "expo-router";
 import { useEffect, useRef, useState } from "react";
-import { AppState, PermissionsAndroid, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Button } from "../components/Button";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { Card } from "../components/Step";
 import { friendlyError } from "../lib/errors";
-import { parseInvite } from "../lib/invite";
+import { fingerprintPreview, parseInvite, type Invite } from "../lib/invite";
 import { SharingService, useSharingStatus } from "../lib/sharing";
+import { colors, spacing } from "../theme";
 
-/** One-time setup: pair, then allow background running. */
+/** One-time pairing. Permissions are on their own screen (permissions.tsx). */
 export default function Setup() {
   const status = useSharingStatus();
   const [cameraPermission, requestCamera] = useCameraPermissions();
   const [scanning, setScanning] = useState(false);
   const [link, setLink] = useState("");
+  const [pending, setPending] = useState<{ raw: string; invite: Invite } | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [notificationsOk, setNotificationsOk] = useState(false);
-  const [tileAdded, setTileAdded] = useState(false);
-  // Read fresh on every render; status events from the service and returning to the app both re-render this screen.
-  const [, setTick] = useState(0);
-  const access = SharingService.clipboardAccess();
-  const [batteryOk, setBatteryOk] = useState(() => SharingService.isBatteryOptimizationIgnored());
 
-  const pairRef = useRef<(raw: string) => void>(() => {});
-
-  async function pair(raw: string) {
+  /** Shows who is about to be paired so the fingerprint can be compared with the laptop before anything is sent. */
+  function review(raw: string) {
     const invite = parseInvite(raw);
     if (!invite) {
       setMessage(friendlyError(new Error("Not a sharing pairing link")));
       return;
     }
+    setScanning(false);
+    setMessage(null);
+    setPending({ raw: raw.trim(), invite });
+  }
+
+  async function confirm() {
+    if (!pending) return;
     setBusy(true);
     setMessage(null);
     try {
-      await SharingService.pair(raw.trim(), Device.deviceName ?? Device.modelName ?? "Android phone");
-      setScanning(false);
+      await SharingService.pair(pending.raw, Device.deviceName ?? Device.modelName ?? "Android phone");
+      setPending(null);
+      router.replace("/permissions");
     } catch (e) {
       setMessage(friendlyError(e));
+      setPending(null);
     } finally {
       setBusy(false);
     }
   }
 
-  // Permissions are changed outside the app (system settings, adb), so re-read them when we come back.
-  useEffect(() => {
-    const sub = AppState.addEventListener("change", (state) => {
-      if (state === "active") setTick((t) => t + 1);
-    });
-    return () => sub.remove();
-  }, []);
-
   // Google's code scanner (its own UI with a viewfinder) reports results here.
+  const reviewRef = useRef(review);
   useEffect(() => {
-    const sub = CameraView.onModernBarcodeScanned(({ data }) => {
-      pairRef.current(data);
-    });
+    reviewRef.current = review;
+  });
+  useEffect(() => {
+    const sub = CameraView.onModernBarcodeScanned(({ data }) => reviewRef.current(data));
     return () => sub.remove();
   }, []);
-
-  async function allowNotifications() {
-    if (Platform.OS !== "android") return;
-    const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS);
-    setNotificationsOk(result === PermissionsAndroid.RESULTS.GRANTED || Platform.Version < 33);
-  }
-
-  useEffect(() => {
-    pairRef.current = pair;
-  });
 
   async function openScanner() {
     if (!cameraPermission?.granted && !(await requestCamera()).granted) {
@@ -85,22 +75,16 @@ export default function Setup() {
     setScanning(true);
   }
 
-  const ready = status.paired;
-
   if (scanning) {
     return (
       <View style={styles.flex}>
-        <CameraView
-          style={styles.flex}
-          barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-          onBarcodeScanned={busy ? undefined : ({ data }) => pair(data)}
-        />
+        <CameraView style={styles.flex} barcodeScannerSettings={{ barcodeTypes: ["qr"] }} onBarcodeScanned={({ data }) => review(data)} />
         <View style={styles.overlay} pointerEvents="none">
           <View style={styles.frame} />
-          <Text style={styles.scanText}>{busy ? "Pairing…" : (message ?? "Point at the QR code on your laptop")}</Text>
+          <Text style={styles.scanText}>{message ?? "Point at the QR code on your laptop"}</Text>
         </View>
         <Pressable style={styles.cancel} onPress={() => setScanning(false)}>
-          <Text style={styles.buttonText}>Cancel</Text>
+          <Text style={styles.cancelText}>Cancel</Text>
         </Pressable>
       </View>
     );
@@ -109,152 +93,69 @@ export default function Setup() {
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.intro}>
-        Set up once. Afterwards sharing and clipboard sync run in the background without opening this app. Received files are filed in a folder named after the sender: your the laptop&apos;s name inside Downloads on this phone, and this phone&apos;s name on your laptop.
+        Set up once. Afterwards sharing and clipboard sync run in the background without opening this app. Received files are filed in a
+        folder named after the sender: the laptop&apos;s name inside Downloads on this phone, and this phone&apos;s name on your laptop.
       </Text>
 
-      {busy ? <Text style={styles.hint}>Pairing…</Text> : null}
       {message ? <ErrorBanner title="Couldn't pair" message={message} onDismiss={() => setMessage(null)} /> : null}
 
-      <Step n={1} title="Pair with your laptop" done={status.paired} doneText={`Paired with ${status.laptopName}`}>
-        <Text style={styles.hint}>On the laptop run `sharingd setup`, then scan the QR.</Text>
-        <Button label="Scan QR" onPress={openScanner} disabled={busy} />
-        <TextInput
-          style={styles.input}
-          placeholder="or paste sharing://pair?… link"
-          value={link}
-          onChangeText={setLink}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-        <Button label={busy ? "Pairing…" : "Pair with link"} onPress={() => pair(link)} disabled={busy || !link} />
-      </Step>
-
-      <Step n={2} title="Allow background running" done={notificationsOk && batteryOk} doneText="Allowed" disabled={!status.paired}>
-        <Button label="Allow notifications" onPress={allowNotifications} />
-        <Button
-          label="Don't optimise battery"
-          onPress={() => {
-            SharingService.requestIgnoreBatteryOptimization();
-            setTimeout(() => setBatteryOk(SharingService.isBatteryOptimizationIgnored()), 1500);
-          }}
-        />
-      </Step>
-
-      <Step n={3} title="Copy from phone to laptop" done={tileAdded} doneText="Tile added" disabled={!status.paired}>
-        <Text style={styles.hint}>
-          Android stops apps reading the clipboard in the background, so phone to laptop copying takes one tap: copy as usual, then tap
-          “Send clipboard” on the tile or in the notification. Laptop to phone is automatic.
-        </Text>
-        <Button
-          label="Add “Send clipboard” tile"
-          onPress={async () => {
-            const result = await SharingService.requestAddClipboardTile();
-            setTileAdded(result !== "unsupported" && !/not_added|error/i.test(result));
-            if (result === "unsupported") setMessage("Pull down Quick Settings, tap the pencil, and drag “Send clipboard” in.");
-          }}
-        />
-      </Step>
-
-      <View style={styles.step}>
-        <Text style={styles.stepTitle}>Automatic copy from phone (optional, advanced)</Text>
-        <Text style={styles.hint}>
-          Skips the tap. It needs two extra permissions and works around an Android privacy rule, so it is off by default. It may
-          show Android&apos;s &quot;pasted from clipboard&quot; notice and can stop working after a system update.
-        </Text>
-        <Text style={styles.hint}>{access.overlay ? "✓" : "✗"} Display over other apps</Text>
-        {!access.overlay ? <Button label="Allow display over other apps" onPress={() => SharingService.requestOverlayPermission()} /> : null}
-        <Text style={styles.hint}>{access.logs ? "✓" : "✗"} Log access (granted from your computer)</Text>
-        {!access.logs ? (
-          <Text selectable style={styles.code}>
-            adb shell pm grant com.walon.sharing android.permission.READ_LOGS
+      {pending ? (
+        <Card title="Pair with this laptop?">
+          <Text style={styles.strong}>{pending.invite.name}</Text>
+          <Text style={styles.hint}>
+            {pending.invite.host}:{pending.invite.port}
           </Text>
-        ) : null}
-        {access.enabled && access.logActive === false ? (
-          <>
-            <Text style={styles.error}>
-              Android hasn&apos;t allowed log access in this session, so copies aren&apos;t being noticed. Tap below and choose “Allow one-time
-              access” when Android asks.
-            </Text>
-            <Button label="Ask for log access again" onPress={() => SharingService.setAutoClipboard(true)} />
-          </>
-        ) : access.enabled && access.logActive ? (
-          <Text style={styles.hint}>✓ Watching for copies</Text>
-        ) : null}
-        <View style={styles.row}>
-          <Text style={styles.stepTitle}>Copy automatically</Text>
-          <Switch
-            value={access.enabled}
-            disabled={!(access.overlay && access.logs)}
-            onValueChange={(on) => {
-              SharingService.setAutoClipboard(on);
-              setTick((t) => t + 1);
-            }}
+          <Text style={styles.hint}>Fingerprint (should match what your laptop shows):</Text>
+          <Text selectable style={styles.code}>
+            {fingerprintPreview(pending.invite.fingerprint)}
+          </Text>
+          {busy ? <Text style={styles.hint}>Waiting for the laptop to accept… (answer the prompt on the laptop)</Text> : null}
+          <Button label={busy ? "Pairing…" : "Pair"} onPress={confirm} disabled={busy} />
+          <Button label="Cancel" onPress={() => setPending(null)} disabled={busy} danger />
+        </Card>
+      ) : (
+        <Card title="Pair with your laptop">
+          <Text style={styles.hint}>On the laptop run `sharingd setup`, then scan the QR.</Text>
+          <Button label="Scan QR" onPress={openScanner} />
+          <TextInput
+            style={styles.input}
+            placeholder="or paste sharing://pair?… link"
+            value={link}
+            onChangeText={setLink}
+            autoCapitalize="none"
+            autoCorrect={false}
           />
-        </View>
-      </View>
+          <Button label="Review link" onPress={() => review(link)} disabled={!link} />
+        </Card>
+      )}
 
-      <Button
-        label="Finish and start"
-        disabled={!ready}
-        onPress={() => {
-          SharingService.start();
-          router.replace("/");
-        }}
-      />
+      {status.paired ? (
+        <Card title={`Paired with ${status.laptopName}`}>
+          <Button label="Continue to permissions" onPress={() => router.replace("/permissions")} />
+        </Card>
+      ) : null}
     </ScrollView>
-  );
-}
-
-function Step({
-  n,
-  title,
-  done,
-  doneText,
-  disabled,
-  children,
-}: {
-  n: number;
-  title: string;
-  done: boolean;
-  doneText: string;
-  disabled?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <View style={[styles.step, disabled && styles.disabled]} pointerEvents={disabled ? "none" : "auto"}>
-      <Text style={styles.stepTitle}>
-        {done ? "✓" : n}. {title}
-      </Text>
-      {done ? <Text style={styles.hint}>{doneText}</Text> : children}
-    </View>
-  );
-}
-
-function Button({ label, onPress, disabled }: { label: string; onPress: () => void; disabled?: boolean }) {
-  return (
-    <Pressable onPress={onPress} disabled={disabled} style={[styles.button, disabled && styles.buttonDisabled]}>
-      <Text style={styles.buttonText}>{label}</Text>
-    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  container: { padding: 24, gap: 16 },
-  row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  code: { fontFamily: "monospace", backgroundColor: "#f2f2f2", padding: 10, borderRadius: 8 },
+  container: { padding: spacing.screen, gap: 16 },
   intro: { fontSize: 16, color: "#444" },
-  step: { gap: 8, padding: 16, borderRadius: 12, borderWidth: 1, borderColor: "#ddd" },
-  disabled: { opacity: 0.4 },
-  stepTitle: { fontSize: 17, fontWeight: "600" },
-  hint: { color: "#666" },
-  error: { color: "#c0392b" },
+  strong: { fontSize: 18, fontWeight: "700" },
+  hint: { color: colors.muted },
+  code: { fontFamily: "monospace", backgroundColor: colors.codeBackground, padding: 10, borderRadius: 8, fontSize: 16 },
   input: { borderWidth: 1, borderColor: "#ccc", borderRadius: 8, padding: 10 },
-  button: { backgroundColor: "#208AEF", padding: 14, borderRadius: 10, alignItems: "center" },
-  buttonDisabled: { opacity: 0.4 },
-  buttonText: { color: "white", fontWeight: "600" },
   overlay: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center", gap: 20 },
   frame: { width: 260, height: 260, borderWidth: 4, borderColor: "white", borderRadius: 24 },
-  scanText: { color: "white", fontWeight: "600", textAlign: "center", paddingHorizontal: 24, textShadowColor: "black", textShadowRadius: 6 },
+  scanText: {
+    color: "white",
+    fontWeight: "600",
+    textAlign: "center",
+    paddingHorizontal: 24,
+    textShadowColor: "black",
+    textShadowRadius: 6,
+  },
   cancel: { position: "absolute", bottom: 40, alignSelf: "center", backgroundColor: "#000a", padding: 14, borderRadius: 10 },
+  cancelText: { color: colors.white, fontWeight: "600" },
 });

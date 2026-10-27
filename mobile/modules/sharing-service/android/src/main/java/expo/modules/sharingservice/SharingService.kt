@@ -26,7 +26,10 @@ class SharingService : Service() {
     } else {
       startForeground(Notifier.FOREGROUND_ID, n)
     }
-    if (!prefs.paired) { stopSelf(); return }
+    if (!prefs.paired) {
+      stopSelf()
+      return
+    }
     connection = Connection(this, prefs, notifier).also { it.start() }
     Status.running = true
     Status.listeners.add(statusListener)
@@ -79,7 +82,9 @@ class SharingService : Service() {
     fun intent(ctx: Context, action: String): Intent = Intent(ctx, SharingService::class.java).setAction(action)
 
     fun start(ctx: Context) = ContextCompat.startForegroundService(ctx, Intent(ctx, SharingService::class.java))
-    fun stop(ctx: Context) { ctx.stopService(Intent(ctx, SharingService::class.java)) }
+    fun stop(ctx: Context) {
+      ctx.stopService(Intent(ctx, SharingService::class.java))
+    }
 
     fun send(ctx: Context, action: String, configure: Intent.() -> Unit) {
       ContextCompat.startForegroundService(ctx, intent(ctx, action).apply(configure))

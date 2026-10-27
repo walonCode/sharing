@@ -42,7 +42,11 @@ class RetryTest {
 
   @Test fun jitterStaysInsideTheCeiling() {
     val p = Retry.Policy()
-    repeat(500) { n -> val c = p.ceiling(n % 10 + 1); val j = p.jitter(c); assertTrue(j in 0..c) }
+    repeat(500) { n ->
+      val c = p.ceiling(n % 10 + 1)
+      val j = p.jitter(c)
+      assertTrue(j in 0..c)
+    }
   }
 
   @Test fun attemptsResetOnProgress() {

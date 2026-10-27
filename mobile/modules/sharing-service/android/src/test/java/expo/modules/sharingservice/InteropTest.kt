@@ -52,12 +52,26 @@ class InteropTest {
 
   private fun sha(f: File): String {
     val md = MessageDigest.getInstance("SHA-256")
-    f.inputStream().use { i -> val b = ByteArray(1 shl 16); while (true) { val n = i.read(b); if (n < 0) break; md.update(b, 0, n) } }
+    f.inputStream().use { i ->
+      val b = ByteArray(1 shl 16)
+      while (true) {
+        val n = i.read(b)
+        if (n < 0) break
+        md.update(b, 0, n)
+      }
+    }
     return md.digest().joinToString("") { "%02x".format(it) }
   }
 
   private fun randomFile(f: File, mib: Int, seed: Long): File {
-    f.outputStream().use { o -> val r = java.util.Random(seed); val b = ByteArray(1 shl 20); repeat(mib) { r.nextBytes(b); o.write(b) } }
+    f.outputStream().use { o ->
+      val r = java.util.Random(seed)
+      val b = ByteArray(1 shl 20)
+      repeat(mib) {
+        r.nextBytes(b)
+        o.write(b)
+      }
+    }
     return f
   }
 
@@ -71,7 +85,10 @@ class InteropTest {
     sock = File(run, "sharing/sharingd.sock")
     val port = ServerSocket(0).use { it.localPort }
     File(cfg, "settings.json").writeText(
-      """{"deviceId":"deadbeefdeadbeef","name":"testlaptop","receiveDir":"${File(work, "recv").path}","port":$port,"maxUploadBytes":68719476736,"maxEntries":200000,"maxTransfersPerPeer":4,"minFreeBytes":0,"maxPartialBytesPerPeer":274877906944,"confirmPairing":false}""",
+      """{"deviceId":"deadbeefdeadbeef","name":"testlaptop","receiveDir":"${File(
+        work,
+        "recv",
+      ).path}","port":$port,"maxUploadBytes":68719476736,"maxEntries":200000,"maxTransfersPerPeer":4,"minFreeBytes":0,"maxPartialBytesPerPeer":274877906944,"confirmPairing":false}""",
     )
     env = mapOf("SHARING_CONFIG_DIR" to cfg.path, "XDG_RUNTIME_DIR" to run.path, "HOME" to work.path)
     daemon = ProcessBuilder(bin, "run").redirectErrorStream(true).redirectOutput(File(work, "daemon.log")).also { it.environment().putAll(env) }.start()
@@ -80,14 +97,20 @@ class InteropTest {
     val link = sh(bin, "pair", "--yes").lines().first { it.startsWith("sharing://") }
     val q = URI(link).rawQuery.split("&").associate { it.substringBefore("=") to URLDecoder.decode(it.substringAfter("="), "UTF-8") }
     val http = Net.build(q.getValue("fp"))
-    val body = JSONObject().put("token", q.getValue("token")).put("deviceId", "phone-interop-01").put("name", "Interop Phone").toString().toRequestBody("application/json".toMediaType())
+    val body = JSONObject().put(
+      "token",
+      q.getValue("token"),
+    ).put("deviceId", "phone-interop-01").put("name", "Interop Phone").toString().toRequestBody("application/json".toMediaType())
     val base = "https://127.0.0.1:$port"
     val token = http.newCall(Request.Builder().url("$base/pair").post(body).build()).execute().use { JSONObject(it.body!!.string()).getString("peerToken") }
     remote = Remote(http, base, stallMs = 2000, token = { token })
   }
 
   @After fun stopDaemon() {
-    if (::daemon.isInitialized) { daemon.destroy(); daemon.waitFor(5, TimeUnit.SECONDS) }
+    if (::daemon.isInitialized) {
+      daemon.destroy()
+      daemon.waitFor(5, TimeUnit.SECONDS)
+    }
     if (::work.isInitialized) work.deleteRecursively()
   }
 
@@ -121,8 +144,14 @@ class InteropTest {
     assertNotNull(res.outcome.error)
     assertTrue("progress must be reported: ${res.transfer.offset}", res.outcome.progress && res.transfer.offset in 1 until big.length())
     die = false
+    // The laptop may still be draining the dead connection, which shows up as a 409 (offset moved)
+    // that the retry policy answers with an immediate retry; do the same here.
     row = res.transfer
     res = up.attempt(row)
+    for (i in 1..3) {
+      if (res.outcome.status != 409) break
+      res = up.attempt(res.transfer)
+    }
     assertEquals(201, res.outcome.status)
     val got = File(work, "recv/Interop Phone/big.bin")
     assertEquals(sha(big), sha(got))
@@ -179,7 +208,10 @@ class InteropTest {
         override fun write(b: Int) = write(byteArrayOf(b.toByte()), 0, 1)
         override fun write(b: ByteArray, off: Int, len: Int) {
           val take = minOf(len.toLong(), limit - written).toInt()
-          if (take > 0) { out.write(b, off, take); written += take }
+          if (take > 0) {
+            out.write(b, off, take)
+            written += take
+          }
           if (take < len) throw IOException("sink died")
         }
         override fun flush() = out.flush()
@@ -206,7 +238,10 @@ class InteropTest {
     assertEquals(sha(src), sha(File(dir, "movie.bin")))
     val deadline = System.currentTimeMillis() + 3000
     var state = ""
-    while (state != "done" && System.currentTimeMillis() < deadline) { state = JSONObject(control("/transfers/$id")).getString("state"); Thread.sleep(50) }
+    while (state != "done" && System.currentTimeMillis() < deadline) {
+      state = JSONObject(control("/transfers/$id")).getString("state")
+      Thread.sleep(50)
+    }
     assertEquals("done", state)
   }
 
@@ -271,14 +306,29 @@ class InteropTest {
 
   @Test fun aSilentLaptopIsCutByTheStallGuard() {
     val srv = ServerSocket(0)
-    Thread { runCatching { srv.accept().use { s -> s.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\nabc".toByteArray()); Thread.sleep(20_000) } } }.also { it.isDaemon = true }.start()
+    Thread {
+      runCatching {
+        srv.accept().use { s ->
+          s.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: 100000\r\n\r\nabc".toByteArray())
+          Thread.sleep(20_000)
+        }
+      }
+    }.also {
+      it.isDaemon =
+        true
+    }.start()
     val plain = okhttp3.OkHttpClient.Builder().readTimeout(0, TimeUnit.SECONDS).build()
     val r = Remote(plain, "http://127.0.0.1:${srv.localPort}", stallMs = 1500, token = { "x" })
     val t0 = System.nanoTime()
     val opened = r.open("/transfer/x", 0, null)
     var err: Throwable? = null
-    try { opened.stream().use { it.readBytes() } } catch (e: IOException) { err = e }
-    opened.close(); srv.close()
+    try {
+      opened.stream().use { it.readBytes() }
+    } catch (e: IOException) {
+      err = e
+    }
+    opened.close()
+    srv.close()
     assertNotNull(err)
     assertTrue("cut after ${(System.nanoTime() - t0) / 1e9}s", (System.nanoTime() - t0) / 1e9 < 8)
   }

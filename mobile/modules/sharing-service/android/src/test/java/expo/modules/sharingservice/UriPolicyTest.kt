@@ -17,8 +17,16 @@ class UriPolicyTest {
   }
 
   @Test fun rejectsFileAndOtherSchemes() {
-    for (u in listOf("file:///sdcard/a.txt", "file:///data/user/0/com.walon.sharing/shared_prefs/sharing.xml", "http://x/y", "android.resource://x/1", "", "no-scheme"))
+    for (u in listOf(
+      "file:///sdcard/a.txt",
+      "file:///data/user/0/com.walon.sharing/shared_prefs/sharing.xml",
+      "http://x/y",
+      "android.resource://x/1",
+      "",
+      "no-scheme",
+    )) {
       assertNotNull(u, reject(u))
+    }
   }
 
   @Test fun rejectsTheAppsOwnProviders() {

@@ -21,14 +21,22 @@ class Downloader(
   fun attempt(t: Transfer): Result {
     val r = remote() ?: return Result(Outcome(error = IOException("laptop not reachable"), unreachable = true), t)
     return try {
-      if (t.extra.has("published")) finishAck(r, t)
-      else if (t.kind == "dir") dirAttempt(r, t) else fileAttempt(r, t)
+      if (t.extra.has("published")) {
+        finishAck(r, t)
+      } else if (t.kind == "dir") {
+        dirAttempt(r, t)
+      } else {
+        fileAttempt(r, t)
+      }
     } catch (e: IOException) {
       Result(Outcome(error = e, unreachable = isUnreachable(e)), store.get(t.id) ?: t)
     }
   }
 
-  private fun persist(t: Transfer): Transfer { store.put(t); return t }
+  private fun persist(t: Transfer): Transfer {
+    store.put(t)
+    return t
+  }
   private fun extra(t: Transfer, f: JSONObject.() -> Unit) = JSONObject(t.extra.toString()).apply(f)
 
   // ---- one file ----
@@ -74,11 +82,17 @@ class Downloader(
       val o = opened.outcome
       if (!o.ok) {
         // 412/416 on a ranged request restart this file from zero (the retry policy allows it once).
-        if (o.ranged && (o.status == 412 || o.status == 416)) { s.truncate(handle, 0); t = persist(t.copy(offset = base, extra = extra(t) { remove("etag") })) }
+        if (o.ranged && (o.status == 412 || o.status == 416)) {
+          s.truncate(handle, 0)
+          t = persist(t.copy(offset = base, extra = extra(t) { remove("etag") }))
+        }
         return Result(o, t)
       }
       val resp = opened.response!!
-      if (offset > 0 && resp.code == 200) { s.truncate(handle, 0); offset = 0 } // the server sent everything again (If-Range missed)
+      if (offset > 0 && resp.code == 200) {
+        s.truncate(handle, 0)
+        offset = 0
+      } // the server sent everything again (If-Range missed)
       resp.header("ETag")?.let { tag -> if (tag != etag) t = persist(t.copy(extra = extra(t) { put("etag", tag) })) }
       var lastSave = System.nanoTime()
       var advanced = false
@@ -93,7 +107,11 @@ class Downloader(
             offset += n
             advanced = true
             onProgress(t, base + offset)
-            if (System.nanoTime() - lastSave > 1_000_000_000L) { lastSave = System.nanoTime(); out.flush(); t = persist(t.copy(offset = base + offset)) }
+            if (System.nanoTime() - lastSave > 1_000_000_000L) {
+              lastSave = System.nanoTime()
+              out.flush()
+              t = persist(t.copy(offset = base + offset))
+            }
           }
         }
       } catch (e: IOException) {
@@ -118,7 +136,11 @@ class Downloader(
     val md = MessageDigest.getInstance("SHA-256")
     s.open(handle).use { input ->
       val buf = ByteArray(Storage.COPY_BUFFER)
-      while (true) { val n = input.read(buf); if (n < 0) break; md.update(buf, 0, n) }
+      while (true) {
+        val n = input.read(buf)
+        if (n < 0) break
+        md.update(buf, 0, n)
+      }
     }
     val got = md.digest().joinToString("") { "%02x".format(it) }
     return if (got.equals(want, ignoreCase = true)) null else "Checksum mismatch after resuming"
@@ -154,7 +176,14 @@ class Downloader(
       if (handle.isEmpty()) {
         handle = s.begin(folder, parts.dropLast(1).map { Names.sanitize(it) }, parts.last())
         store.addArtifact(t.id, handle)
-        t = persist(t.copy(extra = extra(t) { put("current", handle); remove("etag") }))
+        t = persist(
+          t.copy(
+            extra = extra(t) {
+              put("current", handle)
+              remove("etag")
+            },
+          ),
+        )
       }
       val res = fetchInto(r, t, s, handle, "/transfer/${t.source}/files/$index", f.size, maxOf(t.offset - doneBytes, 0), base = doneBytes)
       t = res.transfer
@@ -162,13 +191,28 @@ class Downloader(
       if (!res.outcome.ok || res.outcome.error != null) return res.copy(outcome = res.outcome.copy(progress = advanced))
       verify(r, t.source, index, s, handle)?.let { msg ->
         s.truncate(handle, 0)
-        return if (t.extra.optBoolean("sumRetried")) Result(Outcome(status = 422), t, msg)
-        else Result(Outcome(status = 412, ranged = true), persist(t.copy(offset = doneBytes, extra = extra(t) { put("sumRetried", true) })), msg)
+        return if (t.extra.optBoolean("sumRetried")) {
+          Result(Outcome(status = 422), t, msg)
+        } else {
+          Result(Outcome(status = 412, ranged = true), persist(t.copy(offset = doneBytes, extra = extra(t) { put("sumRetried", true) })), msg)
+        }
       }
       s.publish(handle)
       index++
       doneBytes += f.size
-      t = persist(t.copy(offset = doneBytes, extra = extra(t) { put("index", index); put("doneBytes", doneBytes); put("current", ""); remove("etag"); remove("sumRetried") }))
+      t =
+        persist(
+          t.copy(
+            offset = doneBytes,
+            extra = extra(t) {
+              put("index", index)
+              put("doneBytes", doneBytes)
+              put("current", "")
+              remove("etag")
+              remove("sumRetried")
+            },
+          ),
+        )
     }
     t = persist(t.copy(extra = extra(t) { put("published", folder) }))
     return finishAck(r, t).let { it.copy(outcome = it.outcome.copy(progress = advanced || it.outcome.progress)) }

@@ -13,10 +13,16 @@ class Prefs(ctx: Context) {
   private val vault = Vault(
     object : KeyValue {
       override fun get(k: String) = sp.getString(k, null)
-      override fun put(k: String, v: String) { sp.edit().putString(k, v).apply() }
-      override fun remove(k: String) { sp.edit().remove(k).apply() }
+      override fun put(k: String, v: String) {
+        sp.edit().putString(k, v).apply()
+      }
+      override fun remove(k: String) {
+        sp.edit().remove(k).apply()
+      }
     },
-    plainKey = "peerToken", sealedKey = "peerTokenSealed", key = DeviceKey::get,
+    plainKey = "peerToken",
+    sealedKey = "peerTokenSealed",
+    key = DeviceKey::get,
   )
 
   val deviceId: String

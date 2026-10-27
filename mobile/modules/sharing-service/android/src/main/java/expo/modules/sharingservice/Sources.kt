@@ -21,7 +21,10 @@ fun InputStream.skipFully(n: Long): InputStream {
   var left = n
   while (left > 0) {
     val s = skip(left)
-    if (s > 0) { left -= s; continue }
+    if (s > 0) {
+      left -= s
+      continue
+    }
     if (read() < 0) throw java.io.EOFException("source is shorter than the stored offset")
     left--
   }
@@ -49,7 +52,10 @@ class UriSource(private val resolver: ContentResolver, private val uri: Uri, pri
 }
 
 private class ParcelFileDescriptorInput(private val pfd: android.os.ParcelFileDescriptor) : FileInputStream(pfd.fileDescriptor) {
-  override fun close() { super.close(); pfd.close() }
+  override fun close() {
+    super.close()
+    pfd.close()
+  }
 }
 
 /** Display name and size of a content URI. */
@@ -78,8 +84,10 @@ data class TreeFile(val relPath: String, val uri: Uri?, val size: Long)
  */
 object SafWalker {
   private val cols = arrayOf(
-    DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-    DocumentsContract.Document.COLUMN_MIME_TYPE, DocumentsContract.Document.COLUMN_SIZE,
+    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+    DocumentsContract.Document.COLUMN_MIME_TYPE,
+    DocumentsContract.Document.COLUMN_SIZE,
   )
 
   fun walk(ctx: Context, tree: Uri, maxEntries: Int = MAX_ENTRIES): List<TreeFile> {
@@ -90,12 +98,26 @@ object SafWalker {
       ctx.contentResolver.query(children, cols, null, null, null)?.use { c ->
         while (c.moveToNext()) {
           val isDir = c.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR
-          entries.add(Triple(c.getString(0), Names.sanitize(c.getString(1) ?: "unnamed"), if (isDir) -1L else if (c.isNull(3)) 0L else c.getLong(3)))
+          entries.add(
+            Triple(
+              c.getString(0),
+              Names.sanitize(c.getString(1) ?: "unnamed"),
+              if (isDir) {
+                -1L
+              } else if (c.isNull(3)) {
+                0L
+              } else {
+                c.getLong(3)
+              },
+            ),
+          )
         }
       }
       for ((id, name, size) in entries.sortedBy { it.second }) {
         val rel = if (prefix.isEmpty()) name else "$prefix/$name"
-        if (size < 0) visit(id, rel) else {
+        if (size < 0) {
+          visit(id, rel)
+        } else {
           if (out.size >= maxEntries) throw IllegalStateException("Folder has more than $maxEntries files")
           out.add(TreeFile(rel, DocumentsContract.buildDocumentUriUsingTree(tree, id), size))
         }

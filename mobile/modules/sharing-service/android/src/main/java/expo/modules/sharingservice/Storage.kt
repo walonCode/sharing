@@ -18,12 +18,15 @@ interface Sink {
   fun begin(folder: String?, sub: List<String>, name: String): String
   fun length(handle: String): Long
   fun truncate(handle: String, length: Long)
+
   /** Opens the entry for appending at its current end. */
   fun append(handle: String): OutputStream
   fun open(handle: String): InputStream
+
   /** Makes the entry visible and returns the name it ended up with. */
   fun publish(handle: String): String
   fun discard(handle: String)
+
   /** True if a folder of that name already holds files from an earlier transfer. */
   fun folderTaken(folder: String): Boolean
 }
@@ -34,9 +37,8 @@ object Storage {
 
   fun hasControlChars(s: String) = Names.hasControlChars(s)
 
-  fun mimeFor(name: String): String =
-    MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase())
-      ?: "application/octet-stream"
+  fun mimeFor(name: String): String = MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase())
+    ?: "application/octet-stream"
 
   private val downloads = MediaStore.Downloads.EXTERNAL_CONTENT_URI
 
@@ -60,10 +62,15 @@ object Storage {
   }
 
   fun publish(ctx: Context, uri: Uri) {
-    ctx.contentResolver.update(uri, ContentValues().apply {
-      put(MediaStore.MediaColumns.IS_PENDING, 0)
-      putNull(MediaStore.MediaColumns.DATE_EXPIRES)
-    }, null, null)
+    ctx.contentResolver.update(
+      uri,
+      ContentValues().apply {
+        put(MediaStore.MediaColumns.IS_PENDING, 0)
+        putNull(MediaStore.MediaColumns.DATE_EXPIRES)
+      },
+      null,
+      null,
+    )
   }
 
   fun displayName(ctx: Context, uri: Uri, fallback: String): String =
@@ -71,11 +78,13 @@ object Storage {
       if (it.moveToFirst()) it.getString(0) else null
     } ?: fallback
 
-  fun folderExists(ctx: Context, relPath: String): Boolean =
-    ctx.contentResolver.query(
-      downloads, arrayOf(MediaStore.MediaColumns._ID),
-      "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?", arrayOf("$relPath%"), null,
-    )?.use { it.moveToFirst() } ?: false
+  fun folderExists(ctx: Context, relPath: String): Boolean = ctx.contentResolver.query(
+    downloads,
+    arrayOf(MediaStore.MediaColumns._ID),
+    "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?",
+    arrayOf("$relPath%"),
+    null,
+  )?.use { it.moveToFirst() } ?: false
 
   /** Saves a file received over the revision 1 protocol. Returns the final file name. */
   fun saveFile(ctx: Context, laptop: String, name: String, input: InputStream): String {
@@ -97,8 +106,12 @@ object Storage {
    * [maxBytes] bytes and any name with control characters. Returns the folder name.
    */
   fun untar(
-    ctx: Context, laptop: String, rootName: String, input: InputStream,
-    maxEntries: Int = SafWalker.MAX_ENTRIES, maxBytes: Long = Long.MAX_VALUE,
+    ctx: Context,
+    laptop: String,
+    rootName: String,
+    input: InputStream,
+    maxEntries: Int = SafWalker.MAX_ENTRIES,
+    maxBytes: Long = Long.MAX_VALUE,
   ): String {
     val base = sanitize(rootName)
     var folder = base
@@ -157,8 +170,7 @@ class MediaStoreSink(private val ctx: Context, private val laptop: String) : Sin
     return Storage.insert(ctx, Storage.relativePath(laptop, *parts.toTypedArray()), Storage.sanitize(name)).toString()
   }
 
-  override fun length(handle: String): Long =
-    ctx.contentResolver.openFileDescriptor(Uri.parse(handle), "r")?.use { it.statSize } ?: 0L
+  override fun length(handle: String): Long = ctx.contentResolver.openFileDescriptor(Uri.parse(handle), "r")?.use { it.statSize } ?: 0L
 
   override fun truncate(handle: String, length: Long) {
     ctx.contentResolver.openFileDescriptor(Uri.parse(handle), "rw")?.use { pfd ->
@@ -166,11 +178,9 @@ class MediaStoreSink(private val ctx: Context, private val laptop: String) : Sin
     }
   }
 
-  override fun append(handle: String): OutputStream =
-    ctx.contentResolver.openOutputStream(Uri.parse(handle), "wa") ?: error("Cannot write $handle")
+  override fun append(handle: String): OutputStream = ctx.contentResolver.openOutputStream(Uri.parse(handle), "wa") ?: error("Cannot write $handle")
 
-  override fun open(handle: String): InputStream =
-    ctx.contentResolver.openInputStream(Uri.parse(handle)) ?: error("Cannot read $handle")
+  override fun open(handle: String): InputStream = ctx.contentResolver.openInputStream(Uri.parse(handle)) ?: error("Cannot read $handle")
 
   override fun publish(handle: String): String {
     val uri = Uri.parse(handle)
@@ -178,7 +188,9 @@ class MediaStoreSink(private val ctx: Context, private val laptop: String) : Sin
     return Storage.displayName(ctx, uri, "file")
   }
 
-  override fun discard(handle: String) { runCatching { ctx.contentResolver.delete(Uri.parse(handle), null, null) } }
+  override fun discard(handle: String) {
+    runCatching { ctx.contentResolver.delete(Uri.parse(handle), null, null) }
+  }
 
   override fun folderTaken(folder: String) = Storage.folderExists(ctx, Storage.relativePath(laptop, folder))
 }

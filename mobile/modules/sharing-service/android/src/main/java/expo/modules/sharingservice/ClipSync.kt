@@ -17,7 +17,9 @@ class ClipSync(ctx: Context, private val send: (String) -> Boolean) {
   private val clipboard = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
 
   @Volatile private var last = ""
+
   @Volatile private var lastTs = 0L
+
   @Volatile private var pending: String? = null
 
   /** A clip from the laptop. */
@@ -45,5 +47,7 @@ class ClipSync(ctx: Context, private val send: (String) -> Boolean) {
     if (!send(msg)) pending = text
   }
 
-  companion object { const val MAX_CHARS = 1 shl 20 }
+  companion object {
+    const val MAX_CHARS = 1 shl 20
+  }
 }

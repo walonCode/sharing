@@ -27,14 +27,13 @@ class Notifier(private val ctx: Context) : TransferEvents {
     nm.createNotificationChannel(NotificationChannel(PROGRESS_CHANNEL, "Transfer progress", NotificationManager.IMPORTANCE_LOW))
   }
 
-  fun foreground(text: String): Notification =
-    Notification.Builder(ctx, SERVICE_CHANNEL)
-      .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
-      .setContentTitle("Sharing")
-      .setContentText(text)
-      .setOngoing(true)
-      .addAction(sendClipboardAction())
-      .build()
+  fun foreground(text: String): Notification = Notification.Builder(ctx, SERVICE_CHANNEL)
+    .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
+    .setContentTitle("Sharing")
+    .setContentText(text)
+    .setOngoing(true)
+    .addAction(sendClipboardAction())
+    .build()
 
   /** Android 10+ only lets a focused app read the clipboard, so a tap here (which focuses a transparent activity) is the way in. */
   private fun sendClipboardAction(): Notification.Action {
@@ -68,7 +67,7 @@ class Notifier(private val ctx: Context) : TransferEvents {
     val p = PendingIntent.getForegroundService(ctx, UNDO_CODE, i, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     val n = Notification.Builder(ctx, TRANSFER_CHANNEL)
       .setSmallIcon(android.R.drawable.stat_sys_upload)
-      .setContentTitle("Sending $count item${if (count == 1) "" else "s"} to ${laptop}")
+      .setContentTitle("Sending $count item${if (count == 1) "" else "s"} to $laptop")
       .setContentText("Tap Undo within a few seconds to cancel")
       .setTimeoutAfter(Connection.UNDO_MS)
       .addAction(Notification.Action.Builder(null, "Undo", p).build())
@@ -92,7 +91,9 @@ class Notifier(private val ctx: Context) : TransferEvents {
     if (t.size > 0) {
       val pct = (bytes * 100 / t.size).toInt().coerceIn(0, 100)
       b.setProgress(100, pct, false).setContentText("$pct%")
-    } else b.setProgress(0, 0, true)
+    } else {
+      b.setProgress(0, 0, true)
+    }
     nm.notify(PROGRESS_ID, b.build())
   }
 
@@ -100,8 +101,13 @@ class Notifier(private val ctx: Context) : TransferEvents {
     when (t.state) {
       State.DONE -> {
         nm.cancel(PROGRESS_ID)
-        if (t.direction == Dir.DOWN) { received++; summary(RECEIVED_ID, "Received", received, t.name) }
-        else { sent++; summary(SENT_ID, "Sent", sent, t.name) }
+        if (t.direction == Dir.DOWN) {
+          received++
+          summary(RECEIVED_ID, "Received", received, t.name)
+        } else {
+          sent++
+          summary(SENT_ID, "Sent", sent, t.name)
+        }
       }
       State.FAILED -> {
         nm.cancel(PROGRESS_ID)
@@ -132,7 +138,10 @@ class Notifier(private val ctx: Context) : TransferEvents {
   }
 
   /** Resets the running summaries once the user has seen them (called when the queue goes idle). */
-  fun resetCounts() { received = 0; sent = 0 }
+  fun resetCounts() {
+    received = 0
+    sent = 0
+  }
 
   override fun authFailed() {
     transfer("Pair again", "The laptop no longer trusts this phone")

@@ -28,26 +28,37 @@ class Session(private val ctx: Context, private val prefs: Prefs, private val li
   private val wake = Object()
 
   @Volatile private var stopped = false
+
   @Volatile private var resetBackoff = false
+
   @Volatile private var ws: WebSocket? = null
+
   /** e.g. https://192.168.1.5:53317 while the socket is open. */
   @Volatile var base: String? = null
     private set
   private var thread: Thread? = null
 
   private val netCallback = object : ConnectivityManager.NetworkCallback() {
-    override fun onAvailable(network: Network) { poke(); listener.onNetwork() }
+    override fun onAvailable(network: Network) {
+      poke()
+      listener.onNetwork()
+    }
   }
 
   fun start() {
     stopped = false
     cm.registerDefaultNetworkCallback(netCallback)
-    thread = Thread(::loop, "sharing-session").also { it.isDaemon = true; it.start() }
+    thread = Thread(::loop, "sharing-session").also {
+      it.isDaemon = true
+      it.start()
+    }
   }
 
   fun stop() {
     stopped = true
-    try { cm.unregisterNetworkCallback(netCallback) } catch (_: Exception) {}
+    try {
+      cm.unregisterNetworkCallback(netCallback)
+    } catch (_: Exception) {}
     ws?.cancel()
     poke()
   }
@@ -71,7 +82,10 @@ class Session(private val ctx: Context, private val prefs: Prefs, private val li
       val fp = prefs.fingerprint
       val token = prefs.peerToken
       val laptopId = prefs.laptopId
-      if (fp == null || token == null || laptopId == null) { sleep(5_000); continue }
+      if (fp == null || token == null || laptopId == null) {
+        sleep(5_000)
+        continue
+      }
       val client = Net.client(fp)
 
       var connectedOnce = false
@@ -83,12 +97,20 @@ class Session(private val ctx: Context, private val prefs: Prefs, private val li
       }
       if (stopped) return
       // A connection that lasted resets the backoff; repeated misses stretch it to MAX_BACKOFF.
-      if (connectedOnce || resetBackoff) { backoff = MIN_BACKOFF; resetBackoff = false } else backoff = (backoff * 2).coerceAtMost(MAX_BACKOFF)
+      if (connectedOnce || resetBackoff) {
+        backoff = MIN_BACKOFF
+        resetBackoff = false
+      } else {
+        backoff = (backoff * 2).coerceAtMost(MAX_BACKOFF)
+      }
       Status.connected = false
       Status.changed()
       listener.onDisconnected()
       sleep(backoff)
-      if (resetBackoff) { backoff = MIN_BACKOFF; resetBackoff = false }
+      if (resetBackoff) {
+        backoff = MIN_BACKOFF
+        resetBackoff = false
+      }
     }
   }
 
@@ -100,32 +122,42 @@ class Session(private val ctx: Context, private val prefs: Prefs, private val li
     val req = Request.Builder().url("$url/ws").header("Authorization", "Bearer $token").header("X-Sharing-Proto", "2").build()
     val closed = CountDownLatch(1)
     var opened = false
-    ws = client.newWebSocket(req, object : WebSocketListener() {
-      override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
-        opened = true
-        base = url
-        prefs.lastHost = host
-        prefs.lastPort = port
-        Status.connected = true
-        Status.lastError = null
-        Status.changed()
-        listener.onConnected()
-      }
-      override fun onMessage(webSocket: WebSocket, text: String) {
-        val m = try { JSONObject(text) } catch (_: Exception) { return }
-        if (m.optString("type") == "hello") {
-          val proto = m.optInt("proto", 1)
-          prefs.peerProto = proto
-          listener.onHello(proto)
+    ws = client.newWebSocket(
+      req,
+      object : WebSocketListener() {
+        override fun onOpen(webSocket: WebSocket, response: okhttp3.Response) {
+          opened = true
+          base = url
+          prefs.lastHost = host
+          prefs.lastPort = port
+          Status.connected = true
+          Status.lastError = null
+          Status.changed()
+          listener.onConnected()
         }
-        listener.onMessage(m)
-      }
-      override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = closed.countDown()
-      override fun onFailure(webSocket: WebSocket, t: Throwable, response: okhttp3.Response?) {
-        if (response?.code == 401) { Status.lastError = "Laptop no longer trusts this phone; pair again"; Status.changed() }
-        closed.countDown()
-      }
-    })
+        override fun onMessage(webSocket: WebSocket, text: String) {
+          val m = try {
+            JSONObject(text)
+          } catch (_: Exception) {
+            return
+          }
+          if (m.optString("type") == "hello") {
+            val proto = m.optInt("proto", 1)
+            prefs.peerProto = proto
+            listener.onHello(proto)
+          }
+          listener.onMessage(m)
+        }
+        override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = closed.countDown()
+        override fun onFailure(webSocket: WebSocket, t: Throwable, response: okhttp3.Response?) {
+          if (response?.code == 401) {
+            Status.lastError = "Laptop no longer trusts this phone; pair again"
+            Status.changed()
+          }
+          closed.countDown()
+        }
+      },
+    )
     closed.await()
     base = null
     return opened

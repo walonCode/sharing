@@ -29,7 +29,10 @@ class DownloaderTest {
     dir = java.nio.file.Files.createTempDirectory("dl").toFile()
   }
 
-  @After fun tearDown() { server.shutdown(); dir.deleteRecursively() }
+  @After fun tearDown() {
+    server.shutdown()
+    dir.deleteRecursively()
+  }
 
   private fun remote() = Remote(OkHttpClient(), server.url("/").toString().trimEnd('/'), token = { "tok" })
 
@@ -147,7 +150,13 @@ class DownloaderTest {
   @Test fun unsafeManifestPathsAreRefused() {
     server.dispatcher = object : Dispatcher() {
       override fun dispatch(request: RecordedRequest) = MockResponse().setBody(
-        JSONObject().put("name", "evil").put("dirs", org.json.JSONArray()).put("files", org.json.JSONArray().put(JSONObject().put("path", "../../escape.txt").put("size", 1).put("mtime", 1))).toString(),
+        JSONObject().put(
+          "name",
+          "evil",
+        ).put(
+          "dirs",
+          org.json.JSONArray(),
+        ).put("files", org.json.JSONArray().put(JSONObject().put("path", "../../escape.txt").put("size", 1).put("mtime", 1))).toString(),
       )
     }
     val store = MemoryTransferStore()
@@ -159,11 +168,16 @@ class DownloaderTest {
   }
 
   @Test fun anOldLaptopWithoutManifestsFallsBackToTheTarPath() {
-    server.dispatcher = object : Dispatcher() { override fun dispatch(request: RecordedRequest) = MockResponse().setResponseCode(404) }
+    server.dispatcher = object : Dispatcher() {
+      override fun dispatch(request: RecordedRequest) = MockResponse().setResponseCode(404)
+    }
     var used = false
     val store = MemoryTransferStore()
     val t = Transfer(direction = Dir.DOWN, name = "docs", kind = "dir", source = "o3").also { store.put(it) }
-    val res = Downloader({ remote() }, store, { FileSink(dir) }, legacyDir = { used = true; Outcome(status = 200) }).attempt(t)
+    val res = Downloader({ remote() }, store, { FileSink(dir) }, legacyDir = {
+      used = true
+      Outcome(status = 200)
+    }).attempt(t)
     assertTrue(used && res.outcome.ok)
   }
 

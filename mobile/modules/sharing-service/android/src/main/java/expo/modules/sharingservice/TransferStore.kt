@@ -13,10 +13,10 @@ object Dir {
 }
 
 object State {
-  const val QUEUED = "queued"     // waiting for its turn or for nextRetryAt
+  const val QUEUED = "queued" // waiting for its turn or for nextRetryAt
   const val RUNNING = "running"
   const val DONE = "done"
-  const val FAILED = "failed"     // gave up or permanent error; the user may retry
+  const val FAILED = "failed" // gave up or permanent error; the user may retry
   const val CANCELLED = "cancelled"
 }
 
@@ -52,14 +52,18 @@ interface TransferStore {
   fun get(id: String): Transfer?
   fun all(): List<Transfer>
   fun delete(id: String)
+
   /** Rows that should run now: queued with nextRetryAt <= [now], oldest first. */
   fun due(now: Long): List<Transfer>
+
   /** Marks rows left RUNNING by a killed process as queued again. */
   fun recover()
+
   /** URIs created by a download (so a failed folder deletes only its own files). */
   fun addArtifact(transferId: String, uri: String)
   fun artifacts(transferId: String): List<String>
   fun clearArtifacts(transferId: String)
+
   /** Deletes finished rows older than [olderThan]. */
   fun prune(olderThan: Long)
 }
@@ -67,15 +71,36 @@ interface TransferStore {
 class MemoryTransferStore : TransferStore {
   private val rows = LinkedHashMap<String, Transfer>()
   private val arts = HashMap<String, MutableList<String>>()
-  @Synchronized override fun put(t: Transfer) { rows[t.id] = t }
+
+  @Synchronized override fun put(t: Transfer) {
+    rows[t.id] = t
+  }
+
   @Synchronized override fun get(id: String) = rows[id]
+
   @Synchronized override fun all() = rows.values.toList()
-  @Synchronized override fun delete(id: String) { rows.remove(id); arts.remove(id) }
+
+  @Synchronized override fun delete(id: String) {
+    rows.remove(id)
+    arts.remove(id)
+  }
+
   @Synchronized override fun due(now: Long) = rows.values.filter { it.state == State.QUEUED && it.nextRetryAt <= now }.sortedBy { it.createdAt }
-  @Synchronized override fun recover() { rows.replaceAll { _, t -> if (t.state == State.RUNNING) t.copy(state = State.QUEUED) else t } }
-  @Synchronized override fun addArtifact(transferId: String, uri: String) { arts.getOrPut(transferId) { ArrayList() }.add(uri) }
+
+  @Synchronized override fun recover() {
+    rows.replaceAll { _, t -> if (t.state == State.RUNNING) t.copy(state = State.QUEUED) else t }
+  }
+
+  @Synchronized override fun addArtifact(transferId: String, uri: String) {
+    arts.getOrPut(transferId) { ArrayList() }.add(uri)
+  }
+
   @Synchronized override fun artifacts(transferId: String) = arts[transferId]?.toList() ?: emptyList()
-  @Synchronized override fun clearArtifacts(transferId: String) { arts.remove(transferId) }
+
+  @Synchronized override fun clearArtifacts(transferId: String) {
+    arts.remove(transferId)
+  }
+
   @Synchronized override fun prune(olderThan: Long) {
     rows.values.filter { it.terminal && it.createdAt < olderThan }.map { it.id }.forEach { delete(it) }
   }
@@ -88,7 +113,8 @@ class MemoryTransferStore : TransferStore {
 class SqliteTransferStore(ctx: Context) : TransferStore {
   // Opened by path in noBackupFilesDir (SQLiteOpenHelper would put it in the backed-up databases dir).
   private val db: SQLiteDatabase = SQLiteDatabase.openOrCreateDatabase(
-    java.io.File(ctx.applicationContext.noBackupFilesDir, "transfers.db").path, null,
+    java.io.File(ctx.applicationContext.noBackupFilesDir, "transfers.db").path,
+    null,
   ).also { d ->
     if (d.version == 0) {
       d.execSQL(
@@ -106,10 +132,21 @@ class SqliteTransferStore(ctx: Context) : TransferStore {
   }
 
   private fun cv(t: Transfer) = ContentValues().apply {
-    put("id", t.id); put("direction", t.direction); put("name", t.name); put("kind", t.kind); put("source", t.source)
-    put("size", t.size); put("off", t.offset); put("state", t.state); put("attempts", t.attempts)
-    put("startedAt", t.startedAt); put("nextRetryAt", t.nextRetryAt); put("remoteId", t.remoteId); put("error", t.error)
-    put("createdAt", t.createdAt); put("extra", t.extra.toString())
+    put("id", t.id)
+    put("direction", t.direction)
+    put("name", t.name)
+    put("kind", t.kind)
+    put("source", t.source)
+    put("size", t.size)
+    put("off", t.offset)
+    put("state", t.state)
+    put("attempts", t.attempts)
+    put("startedAt", t.startedAt)
+    put("nextRetryAt", t.nextRetryAt)
+    put("remoteId", t.remoteId)
+    put("error", t.error)
+    put("createdAt", t.createdAt)
+    put("extra", t.extra.toString())
   }
 
   private fun read(c: Cursor) = Transfer(
@@ -126,23 +163,51 @@ class SqliteTransferStore(ctx: Context) : TransferStore {
   private fun query(where: String?, args: Array<String>?, order: String? = "createdAt ASC"): List<Transfer> =
     db.query("transfers", null, where, args, null, null, order).use { c -> buildList { while (c.moveToNext()) add(read(c)) } }
 
-  @Synchronized override fun put(t: Transfer) { db.insertWithOnConflict("transfers", null, cv(t), SQLiteDatabase.CONFLICT_REPLACE) }
-  @Synchronized override fun get(id: String) = query("id = ?", arrayOf(id)).firstOrNull()
-  @Synchronized override fun all() = query(null, null)
-  @Synchronized override fun delete(id: String) {
-    db.delete("transfers", "id = ?", arrayOf(id)); db.delete("artifacts", "transferId = ?", arrayOf(id))
+  @Synchronized override fun put(t: Transfer) {
+    db.insertWithOnConflict("transfers", null, cv(t), SQLiteDatabase.CONFLICT_REPLACE)
   }
+
+  @Synchronized override fun get(id: String) = query("id = ?", arrayOf(id)).firstOrNull()
+
+  @Synchronized override fun all() = query(null, null)
+
+  @Synchronized override fun delete(id: String) {
+    db.delete("transfers", "id = ?", arrayOf(id))
+    db.delete("artifacts", "transferId = ?", arrayOf(id))
+  }
+
   @Synchronized override fun due(now: Long) = query("state = ? AND nextRetryAt <= ?", arrayOf(State.QUEUED, now.toString()))
+
   @Synchronized override fun recover() {
     db.execSQL("UPDATE transfers SET state = ? WHERE state = ?", arrayOf(State.QUEUED, State.RUNNING))
   }
+
   @Synchronized override fun addArtifact(transferId: String, uri: String) {
-    db.insert("artifacts", null, ContentValues().apply { put("transferId", transferId); put("uri", uri) })
+    db.insert(
+      "artifacts",
+      null,
+      ContentValues().apply {
+        put("transferId", transferId)
+        put("uri", uri)
+      },
+    )
   }
-  @Synchronized override fun artifacts(transferId: String): List<String> =
-    db.query("artifacts", arrayOf("uri"), "transferId = ?", arrayOf(transferId), null, null, null)
-      .use { c -> buildList { while (c.moveToNext()) add(c.getString(0)) } }
-  @Synchronized override fun clearArtifacts(transferId: String) { db.delete("artifacts", "transferId = ?", arrayOf(transferId)) }
+
+  @Synchronized override fun artifacts(transferId: String): List<String> = db.query(
+    "artifacts",
+    arrayOf("uri"),
+    "transferId = ?",
+    arrayOf(transferId),
+    null,
+    null,
+    null,
+  )
+    .use { c -> buildList { while (c.moveToNext()) add(c.getString(0)) } }
+
+  @Synchronized override fun clearArtifacts(transferId: String) {
+    db.delete("artifacts", "transferId = ?", arrayOf(transferId))
+  }
+
   @Synchronized override fun prune(olderThan: Long) {
     query("createdAt < ?", arrayOf(olderThan.toString())).filter { it.terminal }.forEach { delete(it.id) }
   }

@@ -26,7 +26,9 @@ object SecretBox {
     val raw = unb64(sealed)
     val c = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_BITS, raw.copyOfRange(0, IV_BYTES))) }
     String(c.doFinal(raw, IV_BYTES, raw.size - IV_BYTES), Charsets.UTF_8)
-  } catch (e: Exception) { null }
+  } catch (e: Exception) {
+    null
+  }
 
   private fun androidB64(b: ByteArray) = Base64.encodeToString(b, Base64.NO_WRAP)
   private fun androidUnB64(s: String) = Base64.decode(s, Base64.NO_WRAP)
@@ -50,7 +52,9 @@ object DeviceKey {
     return gen.generateKey()
   }
 
-  fun delete() { runCatching { KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(ALIAS) } }
+  fun delete() {
+    runCatching { KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(ALIAS) }
+  }
 }
 
 /** Minimal key-value surface so the vault logic is testable without SharedPreferences. */
@@ -88,9 +92,17 @@ class Vault(
   }
 
   fun set(value: String?) {
-    if (value == null) { kv.remove(sealedKey); kv.remove(plainKey); return }
+    if (value == null) {
+      kv.remove(sealedKey)
+      kv.remove(plainKey)
+      return
+    }
     val k = runCatching(key).getOrNull()
-    if (k == null) { usingFallback = true; kv.put(plainKey, value); return }
+    if (k == null) {
+      usingFallback = true
+      kv.put(plainKey, value)
+      return
+    }
     kv.put(sealedKey, SecretBox.seal(k, value, b64))
     kv.remove(plainKey)
   }

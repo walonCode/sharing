@@ -32,7 +32,11 @@ class Connection(private val ctx: Context, private val prefs: Prefs, private val
       }
     }
     override fun changed(t: Transfer) = notifier.changed(t)
-    override fun authFailed() { Status.lastError = "Laptop no longer trusts this phone; pair again"; Status.changed(); notifier.authFailed() }
+    override fun authFailed() {
+      Status.lastError = "Laptop no longer trusts this phone; pair again"
+      Status.changed()
+      notifier.authFailed()
+    }
   }
 
   private val transfers: Transfers = Transfers(
@@ -45,14 +49,18 @@ class Connection(private val ctx: Context, private val prefs: Prefs, private val
   )
 
   private val uploader = Uploader(
-    remote = ::remote, store = store, sources = sources,
+    remote = ::remote,
+    store = store,
+    sources = sources,
     onProgress = { t, b -> events.progress(t, b) },
     legacy = { prefs.peerProto < 2 },
     setLegacy = { prefs.peerProto = 1 },
   )
 
   private val downloader = Downloader(
-    remote = ::remote, store = store, sink = { MediaStoreSink(ctx, prefs.laptopName ?: "laptop") },
+    remote = ::remote,
+    store = store,
+    sink = { MediaStoreSink(ctx, prefs.laptopName ?: "laptop") },
     onProgress = { t, b -> events.progress(t, b) },
     legacyDir = ::legacyDirDownload,
   )
@@ -83,7 +91,10 @@ class Connection(private val ctx: Context, private val prefs: Prefs, private val
   }
 
   /** The user pressed Start or shared something: look for the laptop now. */
-  fun poke() { session.poke(); transfers.retryNow() }
+  fun poke() {
+    session.poke()
+    transfers.retryNow()
+  }
 
   // ---- session events ----
 
@@ -125,16 +136,23 @@ class Connection(private val ctx: Context, private val prefs: Prefs, private val
     val notBefore = System.currentTimeMillis() + UNDO_MS
     for (uri in uris) {
       val refusal = UriPolicy.reject(uri.toString(), authorities, dirs)
-      if (refusal != null) { notifier.transfer("Not sent", refusal); continue }
+      if (refusal != null) {
+        notifier.transfer("Not sent", refusal)
+        continue
+      }
       val meta = queryMeta(ctx.contentResolver, uri)
-      val row = Transfer(direction = Dir.UP, name = Names.sanitize(meta.name), kind = "file", source = uri.toString(), size = meta.size, nextRetryAt = notBefore)
+      val row =
+        Transfer(direction = Dir.UP, name = Names.sanitize(meta.name), kind = "file", source = uri.toString(), size = meta.size, nextRetryAt = notBefore)
       spool.threshold = prefs.spoolThreshold
       val spooled = spool.copyIfSmall(ctx.contentResolver, uri, row.id, meta.size)
       val saved = if (spooled) row.copy(extra = JSONObject().put("spooled", true)) else row
       transfers.enqueue(saved)
       queued.add(row.id)
     }
-    if (queued.isNotEmpty()) { notifier.undoable(queued.size, laptop, queued); session.poke(false) }
+    if (queued.isNotEmpty()) {
+      notifier.undoable(queued.size, laptop, queued)
+      session.poke(false)
+    }
   }
 
   fun uploadTree(tree: Uri) {
@@ -154,7 +172,7 @@ class Connection(private val ctx: Context, private val prefs: Prefs, private val
     return opened.use {
       if (!it.outcome.ok) return@use it.outcome
       try {
-        Storage.untar(ctx, prefs.laptopName ?: "laptop", t.name, it.stream())
+        Storage.untar(ctx, prefs.laptopName ?: "laptop", t.name, it.stream(), maxBytes = LEGACY_MAX_BYTES)
         Outcome(status = 200, progress = true)
       } catch (e: IOException) {
         Outcome(error = e)
@@ -167,5 +185,8 @@ class Connection(private val ctx: Context, private val prefs: Prefs, private val
   companion object {
     /** How long an accidental share can be undone before the upload starts. */
     const val UNDO_MS = 5_000L
+
+    /** Byte cap for a revision 1 tar download, whose total size is not known in advance. */
+    private const val LEGACY_MAX_BYTES = 64L shl 30
   }
 }

@@ -4,7 +4,14 @@ import kotlin.random.Random
 
 /** What to do after a failed attempt. Mirrors api/internal/retry. */
 enum class Action {
-  BACKOFF, NOW, RESTART, AUTH, DROP, PERMANENT, GIVE_UP,
+  BACKOFF,
+  NOW,
+  RESTART,
+  AUTH,
+  DROP,
+  PERMANENT,
+  GIVE_UP,
+
   /** The laptop cannot be reached at all: wait without spending attempts. */
   WAIT,
 }
@@ -62,7 +69,10 @@ object Retry {
     fun ceiling(n: Int): Long {
       var d = baseMs
       var i = 1
-      while (i < n && d < capMs) { d *= 2; i++ }
+      while (i < n && d < capMs) {
+        d *= 2
+        i++
+      }
       return minOf(d, capMs)
     }
 
@@ -73,11 +83,19 @@ object Retry {
       val action = classify(o)
       if (o.progress) st.attempts = 0
       return when (action) {
-        Action.RESTART -> if (st.restarted) Decision(Action.PERMANENT) else { st.restarted = true; Decision(Action.RESTART) }
+        Action.RESTART -> if (st.restarted) {
+          Decision(Action.PERMANENT)
+        } else {
+          st.restarted = true
+          Decision(Action.RESTART)
+        }
         Action.BACKOFF -> {
           st.attempts++
-          if (st.attempts > maxAttempts || clock() - st.startedAt > maxElapsedMs) Decision(Action.GIVE_UP)
-          else Decision(Action.BACKOFF, maxOf(jitter(ceiling(st.attempts)), o.retryAfterMs))
+          if (st.attempts > maxAttempts || clock() - st.startedAt > maxElapsedMs) {
+            Decision(Action.GIVE_UP)
+          } else {
+            Decision(Action.BACKOFF, maxOf(jitter(ceiling(st.attempts)), o.retryAfterMs))
+          }
         }
         Action.WAIT -> {
           // Does not count as an attempt: the laptop being off is not the transfer's fault.

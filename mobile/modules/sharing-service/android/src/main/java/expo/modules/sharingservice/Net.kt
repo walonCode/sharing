@@ -62,7 +62,12 @@ object Net {
     val b = OkHttpClient.Builder()
       .sslSocketFactory(ctx.socketFactory, trust)
       .hostnameVerifier { _, _ -> true }
-      .dispatcher(Dispatcher().apply { maxRequests = 16; maxRequestsPerHost = 16 })
+      .dispatcher(
+        Dispatcher().apply {
+          maxRequests = 16
+          maxRequestsPerHost = 16
+        },
+      )
       .connectTimeout(5, TimeUnit.SECONDS)
       // Transfers are guarded by StallGuard instead of per-read timeouts, so a long idle websocket is fine.
       .readTimeout(0, TimeUnit.SECONDS)

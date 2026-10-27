@@ -2,7 +2,6 @@ package expo.modules.sharingservice
 
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -17,7 +16,9 @@ class TransfersTest {
   private val events = ArrayList<Pair<String, String>>()
   private var transfers: Transfers? = null
 
-  @After fun tearDown() { transfers?.stop() }
+  @After fun tearDown() {
+    transfers?.stop()
+  }
 
   private fun up(name: String = "a.bin") = Transfer(direction = Dir.UP, name = name, kind = "file", source = "content://x/$name", size = 10)
   private fun ok() = Outcome(status = 201)
@@ -31,14 +32,19 @@ class TransfersTest {
     policy: Retry.Policy = Retry.Policy(jitter = { 0 }),
   ): Transfers {
     val ev = object : TransferEvents {
-      override fun changed(t: Transfer) { synchronized(events) { events.add(t.id to t.state) } }
+      override fun changed(t: Transfer) {
+        synchronized(events) { events.add(t.id to t.state) }
+      }
     }
     return Transfers(store, attemptUp, attemptDown, { discarded.add(it.id) }, ev, policy, workers, clock, remote = { null }).also { transfers = it }
   }
 
   private fun waitFor(what: String, cond: () -> Boolean) {
     val end = System.currentTimeMillis() + 5_000
-    while (System.currentTimeMillis() < end) { if (cond()) return; Thread.sleep(10) }
+    while (System.currentTimeMillis() < end) {
+      if (cond()) return
+      Thread.sleep(10)
+    }
     throw AssertionError("timed out waiting for $what; rows=${store.all().map { it.name to it.state }}")
   }
 
@@ -74,7 +80,8 @@ class TransfersTest {
     val calls = AtomicInteger()
     val t = build(attemptUp = { if (calls.incrementAndGet() < 3) Result(Outcome(status = 409, patch = true), it) else Result(ok(), it) })
     t.start()
-    val row = up(); t.enqueue(row)
+    val row = up()
+    t.enqueue(row)
     waitFor("done") { store.get(row.id)?.state == State.DONE }
     assertEquals(3, calls.get())
   }
@@ -82,7 +89,8 @@ class TransfersTest {
   @Test fun unreachableLaptopWaitsWithoutFailing() {
     val t = build(attemptUp = { Result(Outcome(error = IOException("no route"), unreachable = true), it) })
     t.start()
-    val row = up(); t.enqueue(row)
+    val row = up()
+    t.enqueue(row)
     waitFor("waiting") { store.get(row.id)?.let { it.state == State.QUEUED && it.error == "Waiting for your laptop" } == true }
     assertEquals(0, store.get(row.id)!!.attempts)
   }
@@ -90,7 +98,8 @@ class TransfersTest {
   @Test fun permanentFailuresStopWithAReason() {
     val t = build(attemptUp = { Result(Outcome(status = 507), it) })
     t.start()
-    val row = up(); t.enqueue(row)
+    val row = up()
+    t.enqueue(row)
     waitFor("failed") { store.get(row.id)?.state == State.FAILED }
     assertEquals("The laptop's disk is full", store.get(row.id)!!.error)
   }
@@ -98,9 +107,14 @@ class TransfersTest {
   @Test fun givesUpAfterEightAttemptsWithoutProgress() {
     val calls = AtomicInteger()
     var now = 1_000L
-    val t = build(clock = { now }, policy = Retry.Policy(jitter = { it }, clock = { now }), attemptUp = { calls.incrementAndGet(); Result(Outcome(status = 503), it) })
+    val t =
+      build(clock = { now }, policy = Retry.Policy(jitter = { it }, clock = { now }), attemptUp = {
+        calls.incrementAndGet()
+        Result(Outcome(status = 503), it)
+      })
     t.start()
-    val row = up(); t.enqueue(row)
+    val row = up()
+    t.enqueue(row)
     for (i in 1..20) {
       waitFor("attempt $i") { calls.get() >= i || store.get(row.id)?.state == State.FAILED }
       if (store.get(row.id)?.state == State.FAILED) break
@@ -114,11 +128,14 @@ class TransfersTest {
 
   @Test fun authFailureStopsAndSignalsPairAgain() {
     val authFailed = CountDownLatch(1)
-    val ev = object : TransferEvents { override fun authFailed() = authFailed.countDown() }
+    val ev = object : TransferEvents {
+      override fun authFailed() = authFailed.countDown()
+    }
     val t = Transfers(store, { Result(Outcome(status = 401), it) }, { Result(ok(), it) }, {}, ev, Retry.Policy(), 2)
     transfers = t
     t.start()
-    val row = up(); t.enqueue(row)
+    val row = up()
+    t.enqueue(row)
     assertTrue(authFailed.await(5, TimeUnit.SECONDS))
     waitFor("failed") { store.get(row.id)?.state == State.FAILED }
   }
@@ -132,11 +149,14 @@ class TransfersTest {
   }
 
   @Test fun atMostTwoRowsRunAtOnce() {
-    val running = AtomicInteger(); val peak = AtomicInteger()
+    val running = AtomicInteger()
+    val peak = AtomicInteger()
     val release = CountDownLatch(1)
     val t = build(workers = 2, attemptUp = {
-      val n = running.incrementAndGet(); peak.updateAndGet { p -> maxOf(p, n) }
-      release.await(5, TimeUnit.SECONDS); running.decrementAndGet()
+      val n = running.incrementAndGet()
+      peak.updateAndGet { p -> maxOf(p, n) }
+      release.await(5, TimeUnit.SECONDS)
+      running.decrementAndGet()
       Result(ok(), it)
     })
     t.start()
@@ -151,15 +171,23 @@ class TransfersTest {
 
   @Test fun queueSurvivesAProcessRestart() {
     val gate = CountDownLatch(1)
-    val first = build(attemptUp = { gate.await(); Result(Outcome(error = IOException("killed")), it) })
+    val first = build(attemptUp = {
+      gate.await()
+      Result(Outcome(error = IOException("killed")), it)
+    })
     first.start()
-    val a = up("a"); val b = up("b")
-    first.enqueue(a); first.enqueue(b)
+    val a = up("a")
+    val b = up("b")
+    first.enqueue(a)
+    first.enqueue(b)
     waitFor("both running") { store.all().count { it.state == State.RUNNING } == 2 }
     first.stop() // the process dies with rows still marked RUNNING
 
     val done = ConcurrentHashMap.newKeySet<String>()
-    val second = build(attemptUp = { done.add(it.name); Result(ok(), it) })
+    val second = build(attemptUp = {
+      done.add(it.name)
+      Result(ok(), it)
+    })
     second.start() // recover() requeues the rows a killed process left running
     waitFor("both finished after restart") { done.size == 2 && store.all().all { it.state == State.DONE } }
     gate.countDown()
@@ -179,9 +207,15 @@ class TransfersTest {
     val started = CountDownLatch(1)
     val discarded = ArrayList<String>()
     lateinit var t: Transfers
-    t = build(discarded = discarded, attemptUp = { started.countDown(); Thread.sleep(200); t.checkCancelledSafely(it.id); Result(ok(), it) })
+    t = build(discarded = discarded, attemptUp = {
+      started.countDown()
+      Thread.sleep(200)
+      t.checkCancelledSafely(it.id)
+      Result(ok(), it)
+    })
     t.start()
-    val row = up(); t.enqueue(row)
+    val row = up()
+    t.enqueue(row)
     assertTrue(started.await(5, TimeUnit.SECONDS))
     t.cancel(row.id)
     waitFor("cancelled") { store.get(row.id)?.state == State.CANCELLED }
@@ -193,7 +227,8 @@ class TransfersTest {
     val mode = AtomicInteger(0)
     val t = build(attemptUp = { if (mode.get() == 0) Result(Outcome(status = 413), it) else Result(ok(), it) })
     t.start()
-    val row = up(); t.enqueue(row)
+    val row = up()
+    t.enqueue(row)
     waitFor("failed") { store.get(row.id)?.state == State.FAILED }
     mode.set(1)
     t.retry(row.id)
@@ -216,14 +251,22 @@ class TransfersTest {
     val offsets = ArrayList<Long>()
     val t = build(attemptUp = {
       offsets.add(it.offset)
-      if (offsets.size == 1) Result(Outcome(status = 412, ranged = true), it.copy(offset = 7))
-      else Result(ok(), it)
+      if (offsets.size == 1) {
+        Result(Outcome(status = 412, ranged = true), it.copy(offset = 7))
+      } else {
+        Result(ok(), it)
+      }
     })
     t.start()
-    val row = up(); t.enqueue(row)
+    val row = up()
+    t.enqueue(row)
     waitFor("done") { store.get(row.id)?.state == State.DONE }
     assertEquals(listOf(0L, 0L), offsets)
   }
 }
 
-private fun Transfers.checkCancelledSafely(id: String) = try { checkCancelled(id) } catch (_: Cancelled) { throw Cancelled() }
+private fun Transfers.checkCancelledSafely(id: String) = try {
+  checkCancelled(id)
+} catch (_: Cancelled) {
+  throw Cancelled()
+}

@@ -19,14 +19,22 @@ import java.util.concurrent.TimeUnit
 /** Cancels a call when no bytes have moved for [timeoutMs]; a half-dead WiFi link would otherwise hang a transfer. */
 class StallGuard(private val call: Call, private val timeoutMs: Long = STALL_MS) : AutoCloseable {
   @Volatile private var last = System.nanoTime()
+
   @Volatile var stalled = false
     private set
   private val task: ScheduledFuture<*> = timer.scheduleWithFixedDelay({
-    if ((System.nanoTime() - last) / 1_000_000 > timeoutMs) { stalled = true; call.cancel() }
+    if ((System.nanoTime() - last) / 1_000_000 > timeoutMs) {
+      stalled = true
+      call.cancel()
+    }
   }, 1, 1, TimeUnit.SECONDS)
 
-  fun touch() { last = System.nanoTime() }
-  override fun close() { task.cancel(false) }
+  fun touch() {
+    last = System.nanoTime()
+  }
+  override fun close() {
+    task.cancel(false)
+  }
 
   companion object {
     const val STALL_MS = 30_000L
@@ -49,12 +57,7 @@ data class PatchResult(val outcome: Outcome, val offset: Long, val name: String?
  * reports an [Outcome] instead of throwing, so the retry policy sees one shape.
  * Blocking; call from a worker thread.
  */
-class Remote(
-  private val client: OkHttpClient,
-  private val base: String,
-  private val stallMs: Long = StallGuard.STALL_MS,
-  private val token: () -> String?,
-) {
+class Remote(private val client: OkHttpClient, private val base: String, private val stallMs: Long = StallGuard.STALL_MS, private val token: () -> String?) {
   /** Short control calls (create, HEAD, ack...) must finish within 30 s even though transfers have no read timeout. */
   private val quick: OkHttpClient = client.newBuilder().callTimeout(30, TimeUnit.SECONDS).build()
 
@@ -82,7 +85,9 @@ class Remote(
         val j = JSONObject(r.body!!.string())
         o to Created(j.getString("id"), j.optString("dirId").ifEmpty { null })
       }
-    } catch (e: IOException) { failed(e) to null }
+    } catch (e: IOException) {
+      failed(e) to null
+    }
   }
 
   /** Bytes the laptop has durably stored for the upload (HEAD). */
@@ -90,7 +95,9 @@ class Remote(
     quick.newCall(req("/uploads/$id").head().build()).execute().use { r ->
       outcome(r) to (r.header("Upload-Offset")?.toLongOrNull() ?: 0L)
     }
-  } catch (e: IOException) { failed(e) to 0L }
+  } catch (e: IOException) {
+    failed(e) to 0L
+  }
 
   /**
    * Sends [length] bytes (or until EOF when null) from [source], which must be positioned at [offset].
@@ -145,13 +152,19 @@ class Remote(
       val o = outcome(r)
       o to if (o.ok) runCatching { JSONObject(r.body!!.string()).optString("name") }.getOrNull() else null
     }
-  } catch (e: IOException) { failed(e) to null }
+  } catch (e: IOException) {
+    failed(e) to null
+  }
 
   // ---- downloads ----
 
   /** An open response plus the watchdog that cancels it when the link stalls. Close both via [close]. */
   class Opened(val outcome: Outcome, val response: Response?, val guard: StallGuard?) : AutoCloseable {
-    override fun close() { guard?.close(); response?.close() }
+    override fun close() {
+      guard?.close()
+      response?.close()
+    }
+
     /** Input that feeds the watchdog as bytes arrive. */
     fun stream(): InputStream = GuardedInput(response!!.body!!.byteStream(), guard!!)
   }
@@ -168,7 +181,13 @@ class Remote(
     return try {
       val r = call.execute()
       val o = outcome(r, ranged = offset > 0)
-      if (o.ok) Opened(o, r, guard) else { r.close(); guard.close(); Opened(o, null, null) }
+      if (o.ok) {
+        Opened(o, r, guard)
+      } else {
+        r.close()
+        guard.close()
+        Opened(o, null, null)
+      }
     } catch (e: IOException) {
       guard.close()
       Opened(failed(if (guard.stalled) IOException("stalled: no bytes for ${StallGuard.STALL_MS / 1000}s", e) else e, ranged = offset > 0), null, null)
@@ -191,7 +210,9 @@ class Remote(
       val o = outcome(r)
       o to if (o.ok) RemoteManifest.parse(r.body!!.string()) else null
     }
-  } catch (e: IOException) { failed(e) to null }
+  } catch (e: IOException) {
+    failed(e) to null
+  }
 
   /** Digests once the laptop has computed them: a hex string for a file, a list for a folder; null while pending. */
   fun sums(id: String): Pair<String?, List<String>?> = try {
@@ -202,7 +223,11 @@ class Remote(
       val files = j.optJSONArray("files")
       j.optString("sha256").ifEmpty { null } to files?.let { a -> (0 until a.length()).map { a.getString(it) } }
     }
-  } catch (e: IOException) { null to null } catch (e: org.json.JSONException) { null to null }
+  } catch (e: IOException) {
+    null to null
+  } catch (e: org.json.JSONException) {
+    null to null
+  }
 
   fun ack(id: String, status: String, error: String? = null): Outcome {
     val b = JSONObject().put("status", status).apply { if (error != null) put("error", error) }.toString().toRequestBody(JSON)
@@ -213,7 +238,9 @@ class Remote(
 
   private fun simple(r: Request): Outcome = try {
     quick.newCall(r).execute().use { outcome(it) }
-  } catch (e: IOException) { failed(e) }
+  } catch (e: IOException) {
+    failed(e)
+  }
 
   companion object {
     private val JSON = "application/json".toMediaType()

@@ -9,8 +9,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 interface TransferEvents {
   /** [bytes] of the transfer's total have moved. Called often; implementations throttle. */
   fun progress(t: Transfer, bytes: Long) {}
+
   /** The row changed state (queued, running, retry scheduled, done, failed, dropped). */
   fun changed(t: Transfer) {}
+
   /** The laptop rejected the device token: the user must pair again. */
   fun authFailed() {}
 }
@@ -43,6 +45,7 @@ class Transfers(
   private val running = HashMap<String, AtomicBoolean>() // id -> cancel flag
   private var pool: ExecutorService? = null
   private var scheduler: Thread? = null
+
   @Volatile private var stopped = true
 
   fun start() {
@@ -51,12 +54,18 @@ class Transfers(
     store.recover()
     store.prune(clock() - RETENTION_MS)
     pool = Executors.newFixedThreadPool(workers) { r -> Thread(r, "sharing-transfer").also { it.isDaemon = true } }
-    scheduler = Thread(::schedule, "sharing-queue").also { it.isDaemon = true; it.start() }
+    scheduler = Thread(::schedule, "sharing-queue").also {
+      it.isDaemon = true
+      it.start()
+    }
   }
 
   fun stop() {
     stopped = true
-    synchronized(lock) { running.values.forEach { it.set(true) }; lock.notifyAll() }
+    synchronized(lock) {
+      running.values.forEach { it.set(true) }
+      lock.notifyAll()
+    }
     pool?.shutdownNow()
   }
 
@@ -69,7 +78,11 @@ class Transfers(
     poke()
   }
 
-  fun enqueue(t: Transfer) { store.put(t); events.changed(t); poke() }
+  fun enqueue(t: Transfer) {
+    store.put(t)
+    events.changed(t)
+    poke()
+  }
 
   /** A download offer from the laptop; replays of an id already known are ignored. */
   fun onOffer(id: String, kind: String, name: String, size: Long) {
@@ -146,12 +159,17 @@ class Transfers(
         row = store.get(row.id) ?: break
         if (row.state == State.CANCELLED) break
         row = res.transfer.takeIf { it.id == row.id } ?: row
-        if (res.outcome.ok) { finish(row, State.DONE, null); break }
+        if (res.outcome.ok) {
+          finish(row, State.DONE, null)
+          break
+        }
 
         val d = policy.next(st, res.outcome)
         row = row.copy(attempts = st.attempts, startedAt = st.startedAt)
         when (d.action) {
-          Action.NOW -> { store.put(row) }
+          Action.NOW -> {
+            store.put(row)
+          }
           Action.RESTART -> {
             row = restart(row)
             st.restarted = true
@@ -161,7 +179,8 @@ class Transfers(
           Action.BACKOFF, Action.WAIT -> {
             val why = if (d.action == Action.WAIT) "Waiting for your laptop" else (res.message ?: describe(res.outcome))
             row = row.copy(state = State.QUEUED, nextRetryAt = clock() + d.delayMs, error = why)
-            store.put(row); events.changed(row)
+            store.put(row)
+            events.changed(row)
             break
           }
           Action.AUTH -> {
@@ -183,7 +202,10 @@ class Transfers(
         }
       }
     } finally {
-      synchronized(lock) { running.remove(t0.id); lock.notifyAll() }
+      synchronized(lock) {
+        running.remove(t0.id)
+        lock.notifyAll()
+      }
     }
   }
 
@@ -227,7 +249,9 @@ class Transfers(
   }
 
   private var spoolCleaner: (Transfer) -> Unit = {}
-  fun onSpoolCleanup(f: (Transfer) -> Unit) { spoolCleaner = f }
+  fun onSpoolCleanup(f: (Transfer) -> Unit) {
+    spoolCleaner = f
+  }
   private fun cleanupSpool(t: Transfer) = spoolCleaner(t)
 
   companion object {

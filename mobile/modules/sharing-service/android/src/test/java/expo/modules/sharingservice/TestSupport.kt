@@ -9,6 +9,7 @@ import java.io.RandomAccessFile
 /** A [Sink] on a plain directory: pending files get a ".part" suffix until published. */
 class FileSink(private val root: File) : Sink {
   val discarded = ArrayList<String>()
+
   /** Pending handle -> final path once published (a MediaStore URI stays valid; a file path does not). */
   private val published = HashMap<String, File>()
 
@@ -26,7 +27,9 @@ class FileSink(private val root: File) : Sink {
   }
 
   override fun length(handle: String) = File(handle).length()
-  override fun truncate(handle: String, length: Long) { RandomAccessFile(handle, "rw").use { it.setLength(length) } }
+  override fun truncate(handle: String, length: Long) {
+    RandomAccessFile(handle, "rw").use { it.setLength(length) }
+  }
   override fun append(handle: String): OutputStream = FileOutputStream(handle, true)
   override fun open(handle: String): InputStream = File(handle).inputStream()
 
@@ -35,13 +38,30 @@ class FileSink(private val root: File) : Sink {
     val base = f.name.removeSuffix(".part")
     var n = 0
     while (true) {
-      val target = File(f.parentFile, if (n == 0) base else "${base.substringBeforeLast('.', base)} ($n)${if (base.contains('.')) "." + base.substringAfterLast('.') else ""}")
-      if (!target.exists()) { f.renameTo(target); published[handle] = target; return target.name }
+      val target = File(
+        f.parentFile,
+        if (n ==
+          0
+        ) {
+          base
+        } else {
+          "${base.substringBeforeLast('.', base)} ($n)${if (base.contains('.')) "." + base.substringAfterLast('.') else ""}"
+        },
+      )
+      if (!target.exists()) {
+        f.renameTo(target)
+        published[handle] = target
+        return target.name
+      }
       n++
     }
   }
 
-  override fun discard(handle: String) { discarded.add(handle); File(handle).delete(); published[handle]?.delete() }
+  override fun discard(handle: String) {
+    discarded.add(handle)
+    File(handle).delete()
+    published[handle]?.delete()
+  }
   override fun folderTaken(folder: String) = File(root, folder).exists()
 }
 

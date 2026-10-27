@@ -6,7 +6,10 @@
  */
 export function friendlyError(e: unknown): string {
   const raw = e instanceof Error ? e.message : String(e);
-  const cause = raw.split(/Caused by:/i).pop()!.trim();
+  const cause = raw
+    .split(/Caused by:/i)
+    .pop()!
+    .trim();
   // Drop a leading Java class name ("java.net.ConnectException: ...").
   const detail = cause.replace(/^(?:[\w$]+\.)+[\w$]*(?:Exception|Error)(?::\s*)?/, "").trim();
   const text = `${cause} ${detail}`.toLowerCase();
@@ -16,6 +19,15 @@ export function friendlyError(e: unknown): string {
   }
   if (/certificate|sslhandshake|ssl|handshake|trust anchor/.test(text)) {
     return "The laptop's security certificate didn't match. Run `sharingd pair` for a fresh QR code and try again.";
+  }
+  if (/declined/.test(text)) {
+    return "The laptop declined this phone. Run `sharingd pair` again and accept it on the laptop when asked.";
+  }
+  if (/too many failed attempts|429/.test(text)) {
+    return "The laptop is temporarily refusing this phone after too many failed attempts. Wait a minute and try again.";
+  }
+  if (/rejected this phone|bad request|400/.test(text)) {
+    return "The laptop rejected this phone's name or id. Rename the phone in Android settings and try again.";
   }
   if (/expired|already used|403/.test(text)) {
     return "This pairing code has expired or was already used. Run `sharingd pair` on the laptop for a new one.";

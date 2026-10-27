@@ -1,4 +1,4 @@
-This is an Expo/React Native mobile application. Prioritize mobile-first patterns, performance, and cross-platform compatibility.
+This is an Expo/React Native mobile application for Android only (the native core is a Kotlin foreground service). Prioritize mobile-first patterns and performance; iOS and web are intentionally not configured.
 
 ## Expo has changed — do not trust your training data
 
@@ -16,6 +16,8 @@ Use `bunx` instead of `npx` if the project uses bun (`bun.lock` present).
 npx expo install <package>  # ALWAYS use instead of npm/yarn/pnpm/bun add — resolves SDK-compatible versions
 npx expo start              # start the dev server
 npx expo lint               # lint
+bun run format:check        # prettier
+bun test src                # unit tests
 npx tsc --noEmit            # typecheck
 npx expo-doctor             # diagnose dependency and config issues
 npx expo install --fix      # fix incompatible package versions

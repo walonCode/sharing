@@ -12,6 +12,7 @@ data class Result(val outcome: Outcome, val transfer: Transfer, val message: Str
 interface SourceFactory {
   /** The bytes of a file row. May throw SecurityException or FileNotFoundException when access is gone. */
   fun file(t: Transfer): UploadSource
+
   /** Lists the files of a folder row, sorted by relative path. */
   fun tree(t: Transfer): List<TreeFile>
   fun source(f: TreeFile): UploadSource
@@ -35,8 +36,13 @@ class Uploader(
   fun attempt(t: Transfer): Result {
     val r = remote() ?: return Result(Outcome(error = IOException("laptop not reachable"), unreachable = true), t)
     return try {
-      if (legacy()) legacyAttempt(r, t)
-      else if (t.kind == "dir") dirAttempt(r, t) else fileAttempt(r, t)
+      if (legacy()) {
+        legacyAttempt(r, t)
+      } else if (t.kind == "dir") {
+        dirAttempt(r, t)
+      } else {
+        fileAttempt(r, t)
+      }
     } catch (e: SecurityException) {
       Result(Outcome(status = 422), t, "Needs re-share: Android no longer lets this app read the file")
     } catch (e: FileNotFoundException) {
@@ -44,7 +50,10 @@ class Uploader(
     }
   }
 
-  private fun persist(t: Transfer): Transfer { store.put(t); return t }
+  private fun persist(t: Transfer): Transfer {
+    store.put(t)
+    return t
+  }
 
   private fun fileAttempt(r: Remote, t0: Transfer): Result {
     var t = t0
@@ -52,7 +61,10 @@ class Uploader(
     val size = src.size().takeIf { it >= 0 } ?: t.size
     if (t.remoteId == null) {
       val (o, c) = r.createUpload(t.name, "file", size.takeIf { it >= 0 })
-      if (isLegacyAnswer(o)) { setLegacy(); return Result(Outcome(status = 409, patch = true), t) }
+      if (isLegacyAnswer(o)) {
+        setLegacy()
+        return Result(Outcome(status = 409, patch = true), t)
+      }
       if (!o.ok) return Result(o, t)
       t = persist(t.copy(remoteId = c!!.id, offset = 0, size = size))
     }
@@ -97,7 +109,10 @@ class Uploader(
     var dirId = t.extra.optString("dirId")
     if (dirId.isEmpty()) {
       val (o, c) = r.createUpload(t.name, "dir", null)
-      if (isLegacyAnswer(o)) { setLegacy(); return Result(Outcome(status = 409, patch = true), t) }
+      if (isLegacyAnswer(o)) {
+        setLegacy()
+        return Result(Outcome(status = 409, patch = true), t)
+      }
       if (!o.ok) return Result(o, t)
       dirId = c!!.id
       t = persist(t.copy(extra = JSONObject(t.extra.toString()).put("dirId", dirId)))

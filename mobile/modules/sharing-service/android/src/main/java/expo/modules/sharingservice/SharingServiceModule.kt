@@ -58,7 +58,11 @@ class SharingServiceModule : Module() {
 
     AsyncFunction("unpair") {
       SharingService.stop(ctx)
-      Prefs(ctx).apply { Net.shutdown(fingerprint); clearPairing(); enabled = false }
+      Prefs(ctx).apply {
+        Net.shutdown(fingerprint)
+        clearPairing()
+        enabled = false
+      }
       Status.changed()
       status()
     }

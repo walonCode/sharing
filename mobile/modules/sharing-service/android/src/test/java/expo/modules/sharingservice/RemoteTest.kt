@@ -16,15 +16,21 @@ import java.io.ByteArrayInputStream
 class RemoteTest {
   private lateinit var server: MockWebServer
 
-  @Before fun setUp() { server = MockWebServer().also { it.start() } }
-  @After fun tearDown() { server.shutdown() }
+  @Before fun setUp() {
+    server = MockWebServer().also { it.start() }
+  }
+
+  @After fun tearDown() {
+    server.shutdown()
+  }
 
   private fun remote(stallMs: Long = StallGuard.STALL_MS) = Remote(OkHttpClient(), server.url("/").toString().trimEnd('/'), stallMs, token = { "tok" })
 
   @Test fun everyRequestCarriesTheTokenAndProtocolHeader() {
     server.enqueue(MockResponse().setResponseCode(201).setBody("""{"id":"u1"}"""))
     val (o, c) = remote().createUpload("a.bin", "file", 5)
-    assertTrue(o.ok); assertEquals("u1", c!!.id)
+    assertTrue(o.ok)
+    assertEquals("u1", c!!.id)
     val req = server.takeRequest()
     assertEquals("Bearer tok", req.getHeader("Authorization"))
     assertEquals("2", req.getHeader("X-Sharing-Proto"))
@@ -42,9 +48,12 @@ class RemoteTest {
   @Test fun finalPatchReturnsTheFileName() {
     server.enqueue(MockResponse().setResponseCode(201).setBody("""{"name":"a (1).bin"}"""))
     val r = remote().patch("u1", 0, ByteArrayInputStream(ByteArray(5)), 5, false) {}
-    assertEquals(201, r.outcome.status); assertEquals("a (1).bin", r.name)
+    assertEquals(201, r.outcome.status)
+    assertEquals("a (1).bin", r.name)
     val req = server.takeRequest()
-    assertEquals("PATCH", req.method); assertEquals("0", req.getHeader("Upload-Offset")); assertNull(req.getHeader("Upload-Complete"))
+    assertEquals("PATCH", req.method)
+    assertEquals("0", req.getHeader("Upload-Offset"))
+    assertNull(req.getHeader("Upload-Complete"))
   }
 
   @Test fun unknownSizeUploadsMarkTheLastPatchComplete() {
@@ -72,7 +81,8 @@ class RemoteTest {
     assertTrue(opened.outcome.ranged)
     assertEquals(Action.RESTART, Retry.classify(opened.outcome))
     val req = server.takeRequest()
-    assertEquals("bytes=100-", req.getHeader("Range")); assertEquals("\"e\"", req.getHeader("If-Range"))
+    assertEquals("bytes=100-", req.getHeader("Range"))
+    assertEquals("\"e\"", req.getHeader("If-Range"))
   }
 
   @Test fun aStalledPatchIsCutAndReportedAsAStall() {
@@ -93,6 +103,8 @@ class RemoteTest {
 
   @Test fun manifestParsing() {
     val m = RemoteManifest.parse("""{"name":"docs","dirs":["a","b"],"files":[{"path":"a/x","size":3,"mtime":9}]}""")
-    assertEquals("docs", m.name); assertEquals(listOf("a", "b"), m.dirs); assertEquals(3L, m.files[0].size)
+    assertEquals("docs", m.name)
+    assertEquals(listOf("a", "b"), m.dirs)
+    assertEquals(3L, m.files[0].size)
   }
 }
